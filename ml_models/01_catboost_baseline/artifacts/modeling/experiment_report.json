@@ -1,0 +1,1520 @@
+{
+  "selected_spec": {
+    "formulation": "residual",
+    "loss_function": "MAE",
+    "groups": [
+      "geography"
+    ],
+    "include_vehicle": false,
+    "depth": 4,
+    "l2_leaf_reg": 30.0,
+    "iterations": 384,
+    "learning_rate": 0.03,
+    "seeds": [
+      42
+    ]
+  },
+  "selection": {
+    "spec": {
+      "formulation": "residual",
+      "loss_function": "MAE",
+      "groups": [
+        "geography"
+      ],
+      "include_vehicle": false,
+      "depth": 4,
+      "l2_leaf_reg": 30.0,
+      "iterations": 1500,
+      "learning_rate": 0.03,
+      "seeds": [
+        42
+      ]
+    },
+    "features": [
+      "cur_dev_s",
+      "cur_dev_abs_s",
+      "horizon_s",
+      "time_sin",
+      "time_cos",
+      "hour",
+      "last_speed",
+      "last_heading",
+      "has_history",
+      "has_valid_gps",
+      "packet_age_s",
+      "gps_age_s",
+      "last_lon",
+      "last_lat",
+      "target_lon",
+      "target_lat",
+      "distance_to_target_m",
+      "previous_stop_lon",
+      "previous_stop_lat",
+      "target_leg_planned_s",
+      "remaining_visits",
+      "schedule_progress",
+      "geo_lon_cell",
+      "geo_lat_cell"
+    ],
+    "folds": [
+      {
+        "fold": "2026-01-06T10:00:00",
+        "train_rows": 429,
+        "valid_rows": 247,
+        "mae": 73.12875744602383,
+        "persistence_mae": 94.92712550607287,
+        "best_iterations": [
+          383
+        ]
+      },
+      {
+        "fold": "2026-01-06T14:00:00",
+        "train_rows": 675,
+        "valid_rows": 256,
+        "mae": 66.89949683329678,
+        "persistence_mae": 80.1640625,
+        "best_iterations": [
+          602
+        ]
+      },
+      {
+        "fold": "2026-01-06T18:00:00",
+        "train_rows": 935,
+        "valid_rows": 149,
+        "mae": 112.2190861439209,
+        "persistence_mae": 119.69127516778524,
+        "best_iterations": [
+          106
+        ]
+      }
+    ],
+    "mae": 79.61613207658907,
+    "persistence_mae": 94.7898773006135
+  },
+  "test": {
+    "rows": 353,
+    "mae": 72.4858607235531,
+    "p90_absolute_error": 146.68719785501068,
+    "within_30s": 0.32294617563739375,
+    "within_60s": 0.5297450424929179,
+    "within_120s": 0.8073654390934845,
+    "by_vehicle": {
+      "122048": 121.5986581158071,
+      "122613": 39.89567463408562,
+      "122658": 103.1019906077074,
+      "129964": 65.4047799797522,
+      "130072": 23.396513606936836,
+      "130238": 17.61340675742359,
+      "131672": 59.34258997929452,
+      "132430": 109.6966832359465,
+      "133300": 62.80710457920982,
+      "133957": 64.03485344316411,
+      "134040": 65.3089571692289,
+      "134494": 2.035716807829765,
+      "135081": 81.65061644844273
+    },
+    "gps_fresh_mae": 77.21486488272357,
+    "gps_stale_mae": 17.59563387603865,
+    "with_peers_mae": 133.49510760089464,
+    "without_peers_mae": 71.78661434100479,
+    "persistence_mae": 93.35977337110482,
+    "inference_seconds": 0.002239795000605227,
+    "rows_per_second": 157603.70922544875
+  },
+  "recommended_for_submission": true,
+  "submission_strategy": "catboost",
+  "experiments": [
+    {
+      "spec": {
+        "formulation": "direct",
+        "loss_function": "MAE",
+        "groups": [],
+        "include_vehicle": false,
+        "depth": 6,
+        "l2_leaf_reg": 10.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 76.43108956672403,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            116
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 73.37896140413018,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            193
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 131.85909862587147,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            97
+          ]
+        }
+      ],
+      "mae": 87.89953824799541,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "direct",
+        "loss_function": "RMSE",
+        "groups": [],
+        "include_vehicle": false,
+        "depth": 6,
+        "l2_leaf_reg": 10.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 80.73095610729786,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            138
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 78.53746023833514,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            126
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 131.72869014937848,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            53
+          ]
+        }
+      ],
+      "mae": 91.52409633707633,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [],
+        "include_vehicle": false,
+        "depth": 6,
+        "l2_leaf_reg": 10.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 76.22122289942018,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            133
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 72.58714369357202,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            81
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 115.3559077303233,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            40
+          ]
+        }
+      ],
+      "mae": 83.73770106369538,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "RMSE",
+        "groups": [],
+        "include_vehicle": false,
+        "depth": 6,
+        "l2_leaf_reg": 10.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 80.13106868335305,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            234
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 76.26310542633036,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            70
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 116.22246120533266,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            35
+          ]
+        }
+      ],
+      "mae": 86.8602387630726,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "dynamics"
+        ],
+        "include_vehicle": false,
+        "depth": 6,
+        "l2_leaf_reg": 10.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "w1m_packets",
+        "w1m_valid_gps_fraction",
+        "w1m_speed_count",
+        "w1m_speed_mean",
+        "w1m_speed_median",
+        "w1m_speed_min",
+        "w1m_speed_max",
+        "w1m_speed_std",
+        "w1m_stopped_fraction",
+        "w1m_distance_m",
+        "w1m_target_approach_m",
+        "w1m_max_gap_s",
+        "w3m_packets",
+        "w3m_valid_gps_fraction",
+        "w3m_speed_count",
+        "w3m_speed_mean",
+        "w3m_speed_median",
+        "w3m_speed_min",
+        "w3m_speed_max",
+        "w3m_speed_std",
+        "w3m_stopped_fraction",
+        "w3m_distance_m",
+        "w3m_target_approach_m",
+        "w3m_max_gap_s",
+        "w5m_packets",
+        "w5m_valid_gps_fraction",
+        "w5m_speed_count",
+        "w5m_speed_mean",
+        "w5m_speed_median",
+        "w5m_speed_min",
+        "w5m_speed_max",
+        "w5m_speed_std",
+        "w5m_stopped_fraction",
+        "w5m_distance_m",
+        "w5m_target_approach_m",
+        "w5m_max_gap_s",
+        "w10m_packets",
+        "w10m_valid_gps_fraction",
+        "w10m_speed_count",
+        "w10m_speed_mean",
+        "w10m_speed_median",
+        "w10m_speed_min",
+        "w10m_speed_max",
+        "w10m_speed_std",
+        "w10m_stopped_fraction",
+        "w10m_distance_m",
+        "w10m_target_approach_m",
+        "w10m_max_gap_s"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 79.7792854778105,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            264
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 71.526918611508,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            267
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 113.9490878410485,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            43
+          ]
+        }
+      ],
+      "mae": 84.34783553049306,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": false,
+        "depth": 6,
+        "l2_leaf_reg": 10.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 75.01762415177451,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            280
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 67.6365135730208,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            319
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 114.03430571244132,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            48
+          ]
+        }
+      ],
+      "mae": 81.0359082689193,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography",
+          "peers"
+        ],
+        "include_vehicle": false,
+        "depth": 6,
+        "l2_leaf_reg": 10.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell",
+        "peers_300m_count",
+        "peers_300m_speed_median",
+        "peers_300m_speed_std",
+        "peers_300m_age_max_s",
+        "peers_300m_aligned_count",
+        "peers_300m_aligned_speed_median",
+        "peers_300m_aligned_speed_std",
+        "peers_300m_aligned_age_max_s",
+        "peers_700m_count",
+        "peers_700m_speed_median",
+        "peers_700m_speed_std",
+        "peers_700m_age_max_s",
+        "peers_700m_aligned_count",
+        "peers_700m_aligned_speed_median",
+        "peers_700m_aligned_speed_std",
+        "peers_700m_aligned_age_max_s"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 76.1963568542784,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            298
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 66.17748388772536,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            242
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 113.68495120378746,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            98
+          ]
+        }
+      ],
+      "mae": 80.82974501170061,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": true,
+        "depth": 6,
+        "l2_leaf_reg": 10.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell",
+        "tr_id"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 75.09173612750878,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            291
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 66.55819578274492,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            320
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 113.77728811398016,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            95
+          ]
+        }
+      ],
+      "mae": 80.58186023444847,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": false,
+        "depth": 4,
+        "l2_leaf_reg": 3.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 75.5311565456522,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            309
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 70.36095978947469,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            241
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 111.9353992236572,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            56
+          ]
+        }
+      ],
+      "mae": 81.82051511841493,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": false,
+        "depth": 4,
+        "l2_leaf_reg": 10.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 74.28287393378015,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            331
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 68.29390648794822,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            496
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 111.7657330050256,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            126
+          ]
+        }
+      ],
+      "mae": 80.49724561396818,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": false,
+        "depth": 4,
+        "l2_leaf_reg": 30.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 73.12875744602383,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            383
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 66.89949683329678,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            602
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 112.2190861439209,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            106
+          ]
+        }
+      ],
+      "mae": 79.61613207658907,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": false,
+        "depth": 6,
+        "l2_leaf_reg": 3.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 74.03200819968664,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            349
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 66.53218206478866,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            394
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 112.2710410232594,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            77
+          ]
+        }
+      ],
+      "mae": 79.825965868672,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": false,
+        "depth": 6,
+        "l2_leaf_reg": 10.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 75.01762415177451,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            280
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 67.6365135730208,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            319
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 114.03430571244132,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            48
+          ]
+        }
+      ],
+      "mae": 81.0359082689193,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": false,
+        "depth": 6,
+        "l2_leaf_reg": 30.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 74.32845213087265,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            1153
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 67.6059378741332,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            412
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 113.63194676277281,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            116
+          ]
+        }
+      ],
+      "mae": 80.67087091987239,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": false,
+        "depth": 8,
+        "l2_leaf_reg": 3.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 76.65001947309418,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            216
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 67.09676410403094,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            270
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 112.7738699512563,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            132
+          ]
+        }
+      ],
+      "mae": 81.15434515831805,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": false,
+        "depth": 8,
+        "l2_leaf_reg": 10.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 78.44095504895218,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            122
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 66.99789413985656,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            288
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 112.87369471320352,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            56
+          ]
+        }
+      ],
+      "mae": 81.81680568889846,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": false,
+        "depth": 8,
+        "l2_leaf_reg": 30.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 76.25592667298835,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            259
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 66.91379187851399,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            240
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 112.76993411021738,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            132
+          ]
+        }
+      ],
+      "mae": 80.93230796250015,
+      "persistence_mae": 94.7898773006135
+    },
+    {
+      "spec": {
+        "formulation": "residual",
+        "loss_function": "MAE",
+        "groups": [
+          "geography"
+        ],
+        "include_vehicle": false,
+        "depth": 4,
+        "l2_leaf_reg": 30.0,
+        "iterations": 1500,
+        "learning_rate": 0.03,
+        "seeds": [
+          42,
+          17,
+          73
+        ]
+      },
+      "features": [
+        "cur_dev_s",
+        "cur_dev_abs_s",
+        "horizon_s",
+        "time_sin",
+        "time_cos",
+        "hour",
+        "last_speed",
+        "last_heading",
+        "has_history",
+        "has_valid_gps",
+        "packet_age_s",
+        "gps_age_s",
+        "last_lon",
+        "last_lat",
+        "target_lon",
+        "target_lat",
+        "distance_to_target_m",
+        "previous_stop_lon",
+        "previous_stop_lat",
+        "target_leg_planned_s",
+        "remaining_visits",
+        "schedule_progress",
+        "geo_lon_cell",
+        "geo_lat_cell"
+      ],
+      "folds": [
+        {
+          "fold": "2026-01-06T10:00:00",
+          "train_rows": 429,
+          "valid_rows": 247,
+          "mae": 73.43053934505184,
+          "persistence_mae": 94.92712550607287,
+          "best_iterations": [
+            383,
+            381,
+            428
+          ]
+        },
+        {
+          "fold": "2026-01-06T14:00:00",
+          "train_rows": 675,
+          "valid_rows": 256,
+          "mae": 67.06894085040905,
+          "persistence_mae": 80.1640625,
+          "best_iterations": [
+            602,
+            294,
+            460
+          ]
+        },
+        {
+          "fold": "2026-01-06T18:00:00",
+          "train_rows": 935,
+          "valid_rows": 149,
+          "mae": 109.98274560972912,
+          "persistence_mae": 119.69127516778524,
+          "best_iterations": [
+            106,
+            192,
+            386
+          ]
+        }
+      ],
+      "mae": 79.28592204261068,
+      "persistence_mae": 94.7898773006135
+    }
+  ]
+}
