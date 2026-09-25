@@ -1,0 +1,11 @@
+# Защита от случайного добавления локальной раздачи.
+/archives/
+/data/
+/other_info/dataset/train/
+/other_info/dataset/test/
+/other_info/dataset/validate/
+/other_info/dataset/labels/
+/other_info/dataset/ndtp-telemetry-emulator.tar
+
+.DS_Store
+__pycache__/
