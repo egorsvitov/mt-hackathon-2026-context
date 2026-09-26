@@ -1,0 +1,8 @@
+# Промежуточный файл для ML: пересоздаётся build_fixtures.py
+data/points_grid.csv
+# Подложка карты (~60 МБ): python tools/fetch_basemap.py
+data/basemap/*.pmtiles
+*.part
+# Скачанная утилита pmtiles
+tools/.cache/
+__pycache__/

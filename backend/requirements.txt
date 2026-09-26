@@ -1,0 +1,15 @@
+# основа для работы
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+httpx>=0.27.0
+websockets>=12.0
+
+# для работы с БД
+sqlalchemy>=2.0.0
+asyncpg>=0.29.0
+alembic>=1.13.0
+
+# для обработки данных
+pandas>=2.2.0

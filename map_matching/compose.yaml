@@ -1,0 +1,17 @@
+services:
+  valhalla:
+    image: ${VALHALLA_IMAGE:?Run prepare_graph.py first}
+    ports:
+      - "127.0.0.1:8002:8002"
+    volumes:
+      - ${OSM_DIR:?Set OSM_DIR in .env}:/custom_files
+    environment:
+      server_threads: "4"
+      build_elevation: "False"
+      build_admins: "True"
+      build_time_zones: "True"
+      build_transit: "False"
+      use_tiles_ignore_pbf: "False"
+      build_tar: "True"
+      serve_tiles: "True"
+    restart: unless-stopped

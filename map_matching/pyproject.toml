@@ -1,0 +1,19 @@
+[project]
+name = "route-matching"
+version = "1.0.0"
+description = "Route catalog and causal HMM map matching for transport telemetry"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = ["ruff>=0.11,<1"]
+
+[project.scripts]
+route-match = "route_matching.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
