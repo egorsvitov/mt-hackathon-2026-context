@@ -1,0 +1,47 @@
+[
+  {
+    "tr_id": 132430,
+    "unit_id": 1012706,
+    "route_id": "R132430",
+    "event_time": "2026-01-06T08:47:55+03:00",
+    "lat": 55.52649,
+    "lon": 37.44698,
+    "speed": 7,
+    "heading": 352,
+    "location_valid": true,
+    "data_age_s": 5,
+    "status": "live",
+    "severity": "critical",
+    "source": "replay"
+  },
+  {
+    "tr_id": 129964,
+    "unit_id": 894032,
+    "route_id": "R129964",
+    "event_time": "2026-01-06T08:47:49+03:00",
+    "lat": 55.68566,
+    "lon": 37.70784,
+    "speed": 0,
+    "heading": 241,
+    "location_valid": true,
+    "data_age_s": 11,
+    "status": "live",
+    "severity": "warning",
+    "source": "replay"
+  },
+  {
+    "tr_id": 133957,
+    "unit_id": 1099984,
+    "route_id": "R133957",
+    "event_time": "2026-01-06T08:47:51+03:00",
+    "lat": 55.64029,
+    "lon": 37.50342,
+    "speed": 0,
+    "heading": 304,
+    "location_valid": true,
+    "data_age_s": 9,
+    "status": "live",
+    "severity": "warning",
+    "source": "replay"
+  }
+]

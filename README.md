@@ -9,6 +9,9 @@
 | [other_info/dataset/README.md](other_info/dataset/README.md) | Исходное описание датасета, метрики и submission |
 | [other_info/dataset/docs/Emulator-and-Telematic-Packets-Specification.md](other_info/dataset/docs/Emulator-and-Telematic-Packets-Specification.md) | Спецификация NDTP и эмулятора |
 | [planning/plan_gpt6_astra.md](planning/plan_gpt6_astra.md) | Ранее подготовленный анализ и план; выводы требуют проверки |
+| [backend/](backend/) | Backend на FastAPI: приём телеметрии, детектор прибытий, признаки, прогноз через ML-сервис, API дашборда ([README](backend/README.md)) |
+| [dashboard/](dashboard/) | Диспетчерский дашборд: карта MapLibre с офлайн-подложкой OSM, инциденты, проверка прогнозов ([README](dashboard/README.md), [контракт данных](dashboard/CONTRACT.md)) |
+| [docker-compose.yml](docker-compose.yml) | Backend + дашборд одной командой: `DATA_DIR=<датасет> docker compose up --build` |
 
 ## Локальные данные
 

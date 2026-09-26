@@ -1,22 +1,16 @@
 from fastapi import APIRouter
-from app.schemas.incident import IncidentResponse
+
+from app.schemas.dashboard import Incident
+from app.services.pipeline import pipeline
 
 router = APIRouter()
 
 
-@router.get("/incidents", response_model=list[IncidentResponse])
-async def get_active_incidents():
-    """Возвращает список ТС с высоким риском задержки в горизонте 10-15 минут."""
-    # Заглушка для первичной отрисовки дашборда Максом
-    return [
-        IncidentResponse(
-            tr_id="BUS_104",
-            target_stop_id="STOP_12",
-            target_stop_name="Улица Новый Арбат",
-            predicted_delay_sec=340.0,
-            delay_probability=0.88,
-            risk_level="RED",
-            predicted_cause="Аномальное снижение скорости на перегоне",
-            forecast_horizon_min=12.5,
-        )
-    ]
+@router.get("", response_model=list[Incident])
+async def get_incidents():
+    """Инциденты: активные и закрытые за последние 15 минут.
+
+    Инцидент — эпизод риска по ТС: прогноз опоздания/опережения в горизонте 10–15 минут,
+    участок маршрута, предполагаемая причина и рекомендация диспетчеру.
+    """
+    return pipeline.incidents_out()
