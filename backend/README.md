@@ -6,9 +6,10 @@ API для дашборда. Swagger: `http://localhost:8000/docs`.
 
 ```text
 телеметрия ──► pipeline.ingest ──► состояние ТС + детектор прибытий
-(NDTP / CSV replay)                     │ раз в минуту по времени событий, для каждого ТС
-                                        ▼
-                        признаки на T (только данные ≤ T) ──► ML-сервис /predict
+(NDTP / CSV replay)              ├──► HMM map matching ──► matched-положение dashboard
+                                 │ раз в минуту по времени событий, для каждого ТС
+                                 ▼
+                        признаки на T (только данные ≤ T) ──► CatBoost /predict
                                         │                      └─ недоступен → fallback
                                         ▼
                     риск, причина, рекомендация (incident_rules) ──► инциденты ──► API /api/v1/*
@@ -18,14 +19,17 @@ API для дашборда. Swagger: `http://localhost:8000/docs`.
 
 ```bash
 cd backend
-python -m venv .venv && .venv/Scripts/pip install -r requirements.txt   # Linux/macOS: .venv/bin/pip
-REPLAY_SPEED=10 .venv/Scripts/python -m uvicorn app.main:app --port 8000
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt -e ../map_matching
+REPLAY_SPEED=10 .venv/bin/python -m uvicorn app.main:app --port 8000
 ```
 
 Все сервисы вместе — `docker compose up --build` из корня репозитория (см. `docker-compose.yml`).
 
-Перед запуском нужен справочник сети `dashboard/data/network.json`:
-Команды построения каталога и экспорта описаны в `map_matching/README.md`.
+Перед запуском нужны `dashboard/data/network.json` и, для HMM, локальный
+`map_matching/artifacts/catalog-train.json`. Команды построения описаны в
+[map_matching/README.md](../map_matching/README.md). Без каталога backend продолжит
+работу с raw GPS; статус виден в `/health/ready`.
 
 ## Настройки (переменные окружения / `.env`)
 
@@ -34,6 +38,7 @@ REPLAY_SPEED=10 .venv/Scripts/python -m uvicorn app.main:app --port 8000
 | `DATA_DIR` | `../../dataset` | датасет (нужны `<split>/schedule.csv` и `traffic.csv`) |
 | `SCHEDULE_SPLIT` | `test` | чей план загружать; `validate` → `schedule_plan.csv` |
 | `NETWORK_PATH` | `../dashboard/data/network.json` | остановки и геометрия маршрутов |
+| `ROUTE_CATALOG_PATH` | `../map_matching/artifacts/catalog-train.json` | каталог HMM; отсутствие не блокирует backend |
 | `ML_SERVICE_URL` | `http://localhost:8001/predict` | ML-сервис |
 | `REPLAY_AUTOSTART`, `REPLAY_SPEED`, `REPLAY_START` | `true`, `1`, `08:30` | воспроизведение дня из CSV, пока нет живого NDTP |
 | `ARRIVAL_RADIUS_M`, `ARRIVAL_EARLY_SEC`, `ARRIVAL_LATE_SEC` | `40`, `420`, `780` | детектор прибытий |
@@ -58,9 +63,11 @@ REPLAY_SPEED=10 .venv/Scripts/python -m uvicorn app.main:app --port 8000
 * **Факт прибытия** в режиме replay используется только для сверки прогнозов (`Evaluator`) и раскрывается, когда наступил.
 * **Без ML-сервиса** прогноз равен текущему отклонению (`status: fallback`), и это видно в API и на дашборде.
 
-## Что осталось подключить
+## Интеграция
 
-* `services/ndtp_parser.py` — бинарный NDTP от эмулятора → `RawNDTPRecord` → `pipeline.ingest`.
-* ML-сервис с `POST /predict` (CatBoost из ветки `ml`) по контракту из `CONTRACT.md`. Признаки его
-  модели (24 шт.) частично совпадают с `MLFeaturesPayload`; недостающие добавляются в
-  `FeatureExtractor.extract_features`.
+* Backend отправляет 24 признака в CatBoost-сервис и публикует его прогнозы в
+  `/predictions`, `/incidents` и `/metrics`.
+* HMM обрабатывает тот же причинный поток телеметрии. `/vehicles` отдаёт matched
+  координаты, активный `route_pattern_id` и качество позиции.
+* При недоступном CatBoost используется persistence; при недоступном каталоге HMM
+  остаются исходные GPS-координаты.

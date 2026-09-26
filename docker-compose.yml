@@ -1,22 +1,52 @@
-# Backend (приём телеметрии, признаки, прогнозы, API) + дашборд диспетчера.
+# NDTP-парсер + backend (признаки, прогнозы, API) + дашборд диспетчера.
 # Перед первым запуском:
-#   См. map_matching/README.md: каталог, сеть маршрутов и matched replay
+#   См. map_matching/README.md: каталог, network.json и matched replay
 #   python dashboard/tools/fetch_basemap.py                         # подложка карты (~60 МБ)
 # Запуск: DATA_DIR=<путь к датасету> docker compose up --build   ->  http://localhost:8080
 services:
+  ml-service:
+    build:
+      context: .
+      dockerfile: ml_service/Dockerfile
+    ports: ["${ML_PORT:-8001}:8001"]
+    environment:
+      MODEL_VERSION: ${MODEL_VERSION:-01_baseline}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 3
+
+  ndtp-parser:
+    build: ./ndtp-parser
+    ports: ["${NDTP_PORT:-9201}:9201"]
+    environment:
+      BACKEND_URL: http://backend:8000/api/v1/stream/telemetry
+    depends_on:
+      backend:
+        condition: service_healthy
+
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports: ["${BACKEND_PORT:-8000}:8000"]
     environment:
       DATA_DIR: /data
       NETWORK_PATH: /refdata/network.json
+      ROUTE_CATALOG_PATH: /route-data/catalog-train.json
       ML_SERVICE_URL: ${ML_SERVICE_URL:-http://ml-service:8001/predict}
-      REPLAY_AUTOSTART: "true"
+      REPLAY_AUTOSTART: ${REPLAY_AUTOSTART:-true}
       REPLAY_SPEED: ${REPLAY_SPEED:-1}
       REPLAY_START: ${REPLAY_START:-08:30}
     volumes:
       - ${DATA_DIR:-../dataset}:/data:ro
       - ./dashboard/data:/refdata:ro
+      - ./map_matching/artifacts:/route-data:ro
+    depends_on:
+      ml-service:
+        condition: service_healthy
 
   dashboard:
     build: ./dashboard

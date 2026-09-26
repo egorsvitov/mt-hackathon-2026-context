@@ -19,12 +19,19 @@ class StreamingSpatialAdapter:
         timezone_name: str = "Europe/Moscow",
     ):
         self.catalog = catalog
+        self.graph = graph
+        self.config = config
         self.timezone_name = timezone_name
         self.matcher = Matcher(catalog, graph, config, live=True)
         self.last_error: str | None = None
 
     def close(self) -> None:
         self.matcher.close()
+
+    def reset(self) -> None:
+        self.matcher.close()
+        self.matcher = Matcher(self.catalog, self.graph, self.config, live=True)
+        self.last_error = None
 
     def update(self, record) -> MatchState:
         event = from_traffic_row(record, self.timezone_name)

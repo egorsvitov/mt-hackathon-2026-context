@@ -26,8 +26,10 @@ class Settings(BaseSettings):
     # Чьё плановое расписание загружать: test/train (schedule.csv) или validate (schedule_plan.csv).
     # Факты прибытий (time_fact_begin) в онлайн-контур не загружаются.
     SCHEDULE_SPLIT: str = "test"
-    # Справочник сети (остановки и геометрия маршрутов), экспортируется map_matching
+    # Справочник сети экспортируется из map_matching.
     NETWORK_PATH: str = "../dashboard/data/network.json"
+    # Офлайн-каталог HMM. Если файла нет, backend продолжает работать с raw GPS.
+    ROUTE_CATALOG_PATH: str | None = "../map_matching/artifacts/catalog-train.json"
     # Наивные метки времени датасета — московское время.
     TZ_OFFSET_HOURS: int = 3
 

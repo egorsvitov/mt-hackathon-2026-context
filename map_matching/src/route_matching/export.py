@@ -152,6 +152,6 @@ def write_dashboard_network(catalog: Catalog, path: str | Path) -> dict:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(payload, ensure_ascii=False, allow_nan=False, indent=2) + "\n", encoding="utf-8"
+        json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n", encoding="utf-8"
     )
     return payload

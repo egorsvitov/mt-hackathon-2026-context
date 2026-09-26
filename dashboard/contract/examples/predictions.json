@@ -1,39 +1,120 @@
 [
   {
-    "sample_id": "132430_1767689280",
-    "tr_id": 132430,
-    "route_id": "R132430",
-    "as_of": "2026-01-06T08:48:00+03:00",
-    "generated_at": "2026-01-06T08:48:00+03:00",
-    "target_stop_id": 53698549399,
-    "target_stop_name": "б/н, 1,4 км от ул. Сосенский Стан, д.5",
-    "target_time_begin": "2026-01-06T08:59:00+03:00",
+    "sample_id": "131672_1767732480",
+    "tr_id": 131672,
+    "route_id": "R131672",
+    "as_of": "2026-01-06T20:48:00+03:00",
+    "generated_at": "2026-01-06T20:48:00+03:00",
+    "target_stop_id": 53718793889,
+    "target_stop_name": "Новокосинская ул., д.20, к.1",
+    "target_time_begin": "2026-01-06T20:59:00+03:00",
     "horizon_s": 660,
-    "prediction_delay_s": 191,
-    "predicted_arrival": "2026-01-06T09:02:11+03:00",
-    "late_probability": 0.86,
-    "cur_dev_s": 330,
+    "prediction_delay_s": 197,
+    "predicted_arrival": "2026-01-06T21:02:17+03:00",
+    "late_probability": null,
+    "cur_dev_s": 606,
     "severity": "critical",
     "status": "model",
-    "model_version": "demo-hgb-0.1",
-    "data_age_s": 5,
+    "model_version": "external:preds_catboost.csv",
+    "data_age_s": 12,
     "segment": {
-      "from_stop_id": 53698549389,
-      "from_stop_name": "Остановка б/н",
-      "to_stop_id": 53698549399,
-      "to_stop_name": "б/н, 1,4 км от ул. Сосенский Стан, д.5"
+      "from_stop_id": 53718793833,
+      "from_stop_name": "Салтыковская ул., д.1А",
+      "to_stop_id": 53718793889,
+      "to_stop_name": "Новокосинская ул., д.20, к.1"
     },
     "reason": {
-      "code": "GROWING",
-      "title": "Опоздание нарастает",
-      "detail": "Отклонение выросло на 462 с за последние 15 мин"
+      "code": "LONG_DWELL",
+      "title": "Затянувшаяся стоянка у остановки",
+      "detail": "ТС стоит у остановки 3 мин 30 с"
     },
     "evidence": [
       {
         "code": "speed_5m",
         "label": "Средняя скорость за 5 мин",
-        "value": 10.9,
-        "norm": 15.1,
+        "value": 0.3,
+        "norm": 9.6,
+        "unit": "км/ч",
+        "flag": false
+      },
+      {
+        "code": "stationary",
+        "label": "Непрерывный простой",
+        "value": 210.0,
+        "norm": null,
+        "unit": "с",
+        "flag": true
+      },
+      {
+        "code": "dev_trend_15m",
+        "label": "Изменение отклонения за 15 мин",
+        "value": 0.0,
+        "norm": null,
+        "unit": "с",
+        "flag": false
+      },
+      {
+        "code": "cur_dev",
+        "label": "Отклонение на последней остановке",
+        "value": 606.0,
+        "norm": null,
+        "unit": "с",
+        "flag": false
+      },
+      {
+        "code": "required_speed",
+        "label": "Нужная скорость до цели",
+        "value": 5.5,
+        "norm": 9.6,
+        "unit": "км/ч",
+        "flag": false
+      },
+      {
+        "code": "gps_age",
+        "label": "Возраст GPS-отметки",
+        "value": 12.0,
+        "norm": null,
+        "unit": "с",
+        "flag": false
+      }
+    ],
+    "recommendation": "Уточнить причину стоянки (посадка, отстой); при необходимости сократить стоянку"
+  },
+  {
+    "sample_id": "130072_1767732480",
+    "tr_id": 130072,
+    "route_id": "R130072",
+    "as_of": "2026-01-06T20:48:00+03:00",
+    "generated_at": "2026-01-06T20:48:00+03:00",
+    "target_stop_id": 53698461668,
+    "target_stop_name": "Остановка б/н",
+    "target_time_begin": "2026-01-06T20:59:00+03:00",
+    "horizon_s": 660,
+    "prediction_delay_s": 92,
+    "predicted_arrival": "2026-01-06T21:00:32+03:00",
+    "late_probability": null,
+    "cur_dev_s": 181,
+    "severity": "warning",
+    "status": "model",
+    "model_version": "external:preds_catboost.csv",
+    "data_age_s": 1,
+    "segment": {
+      "from_stop_id": 53698461646,
+      "from_stop_name": "пр. № 673, д.1",
+      "to_stop_id": 53698461668,
+      "to_stop_name": "Остановка б/н"
+    },
+    "reason": {
+      "code": "GROWING",
+      "title": "Опоздание нарастает",
+      "detail": "Отклонение выросло на 130 с за последние 15 мин"
+    },
+    "evidence": [
+      {
+        "code": "speed_5m",
+        "label": "Средняя скорость за 5 мин",
+        "value": 17.2,
+        "norm": 22.8,
         "unit": "км/ч",
         "flag": false
       },
@@ -48,7 +129,7 @@
       {
         "code": "dev_trend_15m",
         "label": "Изменение отклонения за 15 мин",
-        "value": 462.0,
+        "value": 130.0,
         "norm": null,
         "unit": "с",
         "flag": true
@@ -56,7 +137,7 @@
       {
         "code": "cur_dev",
         "label": "Отклонение на последней остановке",
-        "value": 330.0,
+        "value": 181.0,
         "norm": null,
         "unit": "с",
         "flag": false
@@ -64,101 +145,20 @@
       {
         "code": "required_speed",
         "label": "Нужная скорость до цели",
-        "value": 23.5,
-        "norm": 15.1,
+        "value": 31.7,
+        "norm": 22.8,
         "unit": "км/ч",
         "flag": false
       },
       {
         "code": "gps_age",
         "label": "Возраст GPS-отметки",
-        "value": 5.0,
+        "value": 1.0,
         "norm": null,
         "unit": "с",
         "flag": false
       }
     ],
     "recommendation": "Предупредить водителя; подготовить выравнивание интервала (удержание следующего рейса)"
-  },
-  {
-    "sample_id": "129964_1767689280",
-    "tr_id": 129964,
-    "route_id": "R129964",
-    "as_of": "2026-01-06T08:48:00+03:00",
-    "generated_at": "2026-01-06T08:48:00+03:00",
-    "target_stop_id": 53700336530,
-    "target_stop_name": "ул. Речников, д.25",
-    "target_time_begin": "2026-01-06T08:59:00+03:00",
-    "horizon_s": 660,
-    "prediction_delay_s": 87,
-    "predicted_arrival": "2026-01-06T09:00:27+03:00",
-    "late_probability": 0.37,
-    "cur_dev_s": 221,
-    "severity": "warning",
-    "status": "model",
-    "model_version": "demo-hgb-0.1",
-    "data_age_s": 11,
-    "segment": {
-      "from_stop_id": 53700336396,
-      "from_stop_name": "Коломенская ул., д.1",
-      "to_stop_id": 53700336530,
-      "to_stop_name": "ул. Речников, д.25"
-    },
-    "reason": {
-      "code": "LONG_DWELL",
-      "title": "Затянувшаяся стоянка у остановки",
-      "detail": "ТС стоит у остановки 2 мин 00 с"
-    },
-    "evidence": [
-      {
-        "code": "speed_5m",
-        "label": "Средняя скорость за 5 мин",
-        "value": 6.6,
-        "norm": 14.2,
-        "unit": "км/ч",
-        "flag": false
-      },
-      {
-        "code": "stationary",
-        "label": "Непрерывный простой",
-        "value": 120.0,
-        "norm": null,
-        "unit": "с",
-        "flag": true
-      },
-      {
-        "code": "dev_trend_15m",
-        "label": "Изменение отклонения за 15 мин",
-        "value": 197.0,
-        "norm": null,
-        "unit": "с",
-        "flag": false
-      },
-      {
-        "code": "cur_dev",
-        "label": "Отклонение на последней остановке",
-        "value": 221.0,
-        "norm": null,
-        "unit": "с",
-        "flag": false
-      },
-      {
-        "code": "required_speed",
-        "label": "Нужная скорость до цели",
-        "value": 8.0,
-        "norm": 14.2,
-        "unit": "км/ч",
-        "flag": false
-      },
-      {
-        "code": "gps_age",
-        "label": "Возраст GPS-отметки",
-        "value": 11.0,
-        "norm": null,
-        "unit": "с",
-        "flag": false
-      }
-    ],
-    "recommendation": "Уточнить причину стоянки (посадка, отстой); при необходимости сократить стоянку"
   }
 ]

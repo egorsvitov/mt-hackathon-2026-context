@@ -29,8 +29,8 @@
 ```bash
 python dashboard/tools/build_fixtures.py --data-dir ../data/dataset  # базовый replay и прогнозы
 # Затем постройте network.json и matched replay по map_matching/README.md.
-python dashboard/tools/fetch_basemap.py                              # подложка карты, ~60 МБ
-DATA_DIR=../data/dataset docker compose up --build                   # http://localhost:8080
+python dashboard/tools/fetch_basemap.py                          # подложка карты, ~60 МБ (один раз)
+DATA_DIR=../data/dataset docker compose up --build                    # http://localhost:8080
 ```
 
 Если порт 8080 занят, задайте `DASHBOARD_PORT=18090`. В Git Bash на Windows сначала выполните `export MSYS_NO_PATHCONV=1`.
@@ -62,13 +62,13 @@ Backend (`backend/`) отдаёт `/api/v1/network`, `/schedule`, `/vehicles`, `
 
 ## Откуда берутся данные
 
-Генератор `tools/build_fixtures.py` собирает прогнозы и базовый replay из `test`. Затем `map_matching` экспортирует OSM-геометрию маршрутов и причинно сопоставленные координаты. Браузер на каждый момент показывает только то, что уже произошло.
+Генератор `tools/build_fixtures.py` собирает прогнозы и базовый replay из `test`. Затем `map_matching` экспортирует OSM-геометрию и matched-позиции. Браузер на каждый момент показывает только то, что уже произошло.
 
 | Что на экране | Источник |
 |---|---|
 | Положение, скорость, курс ТС | `traffic.csv` |
 | Остановки, план | `schedule.csv` (план). Безымянным остановкам подписан ближайший адрес |
-| Геометрия маршрутов | Каталог `map_matching`: исторические GPS-проходы, привязанные к локальному графу Valhalla/OSM; экспортируется в `data/network.json` |
+| Геометрия маршрутов | Каталог `map_matching`: исторические GPS-проходы, привязанные к Valhalla/OSM; экспортируется в `data/network.json` |
 | Прогноз | REPLAY — демо-модель sklearn или `--predictions`; LIVE — ML-сервис через backend, без него — fallback «прогноз = текущее отклонение» |
 | Причины и рекомендации | Правила `backend/app/services/incident_rules.py` — одни и те же в REPLAY и в backend |
 | Факт, «Проверка», живой MAE | `time_fact_begin` показывается только после наступления события. В backend факт служит только для сверки, в признаки не попадает |
@@ -123,7 +123,7 @@ dashboard/
 ├── data/replay.js            день для воспроизведения (генерируется)
 ├── data/network.json         справочник сети для backend (генерируется)
 ├── data/basemap/moscow.pmtiles   подложка OSM (tools/fetch_basemap.py, в git не хранится)
-├── tools/build_fixtures.py   прогнозы, базовый replay, примеры контракта
+├── tools/build_fixtures.py   сборка данных, демо-модель, примеры контракта
 ├── tools/fetch_basemap.py    скачивание вырезки OSM (Protomaps) по району маршрутов
 ├── tools/mock_backend.py     эталонный backend по контракту для отладки
 ├── CONTRACT.md, contract/examples/   формат данных между ML, backend и дашбордом
@@ -132,7 +132,7 @@ dashboard/
 
 ## Допущения
 
-* **Маршрутный паттерн восстанавливается офлайн.** Исторические GPS-проходы и плановые остановки привязываются к OSM. Неподтверждённая геометрия помечается качеством и источником.
+* **Маршрутный паттерн восстанавливается офлайн.** Исторические GPS-проходы и плановые остановки привязываются к OSM; HMM выбирает активное направление в потоке.
 * **Причины — гипотезы по признакам** (скорость против нормы, простой, рост отклонения, возраст GPS). Данных о дверях, пробках и ДТП нет.
 * **Подложка** — вырезка OSM от 25.09.2026 по району всех маршрутов (Зеленоград — Видное, Внуково — Балашиха), зум до 14. Данные © участники OpenStreetMap (ODbL), подпись на карте есть.
 * Синтетические ТС (`9000000+`) не показываются: это копии реальных.

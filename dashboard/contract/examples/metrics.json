@@ -1,23 +1,18 @@
 {
-  "now": "2026-01-06T08:48:00+03:00",
+  "now": "2026-01-06T20:48:00+03:00",
   "mode": "replay",
   "source": "replay",
-  "model_version": "demo-hgb-0.1",
-  "vehicles_live": 11,
-  "packets_per_min": 47,
-  "last_packet_at": "2026-01-06T08:47:56+03:00",
-  "inference_latency_ms_p50": 8.24,
-  "inference_latency_ms_p95": 8.24,
+  "model_version": "external:preds_catboost.csv",
+  "vehicles_live": 9,
+  "packets_per_min": 35,
+  "last_packet_at": "2026-01-06T20:47:59+03:00",
+  "inference_latency_ms_p50": null,
+  "inference_latency_ms_p95": null,
   "queue_lag_s": 0,
   "reconnects": 0,
-  "mae_live_s": 59.8,
-  "mae_baseline_live_s": 82.8,
-  "n_verified": 2534,
-  "n_verified_grid5": 510,
-  "offline_eval": {
-    "mae_model": 67.41,
-    "mae_cur_dev": 93.36,
-    "n": 353,
-    "on": "labels_test"
-  }
+  "mae_live_s": 73.6,
+  "mae_baseline_live_s": 92.2,
+  "n_verified": 7386,
+  "n_verified_grid5": 1481,
+  "offline_eval": null
 }

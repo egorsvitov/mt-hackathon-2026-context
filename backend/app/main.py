@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Справочные данные: сеть маршрутов и плановое расписание.
     pipeline.network.load()
+    pipeline.load_spatial()
     pipeline.replay = ReplayFeeder(pipeline)
     if settings.REPLAY_AUTOSTART and pipeline.network.loaded:
         try:
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
             log.exception("Replay не запущен — backend работает без потока")
     yield
     await pipeline.replay.stop()
+    pipeline.close()
 
 
 app = FastAPI(

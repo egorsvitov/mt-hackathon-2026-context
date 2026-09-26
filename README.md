@@ -9,9 +9,14 @@
 | [other_info/dataset/README.md](other_info/dataset/README.md) | Исходное описание датасета, метрики и submission |
 | [other_info/dataset/docs/Emulator-and-Telematic-Packets-Specification.md](other_info/dataset/docs/Emulator-and-Telematic-Packets-Specification.md) | Спецификация NDTP и эмулятора |
 | [planning/plan_gpt6_astra.md](planning/plan_gpt6_astra.md) | Ранее подготовленный анализ и план; выводы требуют проверки |
+| [backend/](backend/) | Backend на FastAPI: приём телеметрии, детектор прибытий, признаки, прогноз через ML-сервис, API дашборда ([README](backend/README.md)) |
+| [dashboard/](dashboard/) | Диспетчерский дашборд: карта MapLibre с офлайн-подложкой OSM, инциденты, проверка прогнозов ([README](dashboard/README.md), [контракт данных](dashboard/CONTRACT.md)) |
+| [map_matching/](map_matching/) | Офлайн-каталог маршрутов, причинный HMM и экспорт matched-геометрии для backend и dashboard |
+| [docker-compose.yml](docker-compose.yml) | NDTP-парсер + backend + CatBoost ML-сервис + дашборд одной командой: `DATA_DIR=<датасет> docker compose up --build` |
 | [research/deep-research-report.md](research/deep-research-report.md) | Обзор литературы и рекомендации по ML-архитектуре |
 | [planning/architecture_after_research.md](planning/architecture_after_research.md) | Разбор отчёта, повторная проверка данных и предложение архитектуры |
 | [ml_models/01_catboost_baseline/](ml_models/01_catboost_baseline/) | Первый CatBoost baseline: код, обученная модель, submission, тесты и описание эксперимента |
+| [ndtp-parser/](ndtp-parser/) | TCP-приёмник и парсер телеметрии NDTP в формат `traffic.csv` |
 | [research/papers/Wai_Zhou_2020_Real_Time_Bus_Time_Predictions.pdf](research/papers/Wai_Zhou_2020_Real_Time_Bus_Time_Predictions.pdf) | Wai & Zhou (2020): production-архитектура XGBoost-прогнозов времени движения и стоянки |
 
 ## Локальные данные

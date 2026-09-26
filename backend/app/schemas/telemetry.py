@@ -54,3 +54,22 @@ class MLFeaturesPayload(BaseModel):
     near_stop_m: Optional[float] = None
     remaining_visits: Optional[int] = None
     hour: Optional[float] = None
+
+    # --- полный набор признаков модели (24 шт., см. ml_models/.../manifest.json) ---
+    cur_dev_s: Optional[float] = Field(None, description="Алиас current_delay_sec в именах модели")
+    last_heading: Optional[float] = Field(None, description="Алиас heading в именах модели")
+    last_speed: Optional[float] = None
+    last_lon: Optional[float] = None
+    last_lat: Optional[float] = None
+    cur_dev_abs_s: Optional[float] = None
+    time_sin: Optional[float] = None
+    time_cos: Optional[float] = None
+    has_history: Optional[bool] = None
+    has_valid_gps: Optional[bool] = None
+    packet_age_s: Optional[float] = None
+    geo_lon_cell: Optional[float] = None
+    geo_lat_cell: Optional[float] = None
+    previous_stop_lon: Optional[float] = None
+    previous_stop_lat: Optional[float] = None
+    target_leg_planned_s: Optional[float] = None
+    schedule_progress: Optional[float] = None

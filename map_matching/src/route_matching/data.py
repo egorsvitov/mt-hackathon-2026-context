@@ -119,16 +119,23 @@ def from_traffic_row(row, timezone_name: str) -> Event:
     valid = get("location_valid", False)
     if isinstance(valid, str):
         valid = valid.lower() == "true"
+    event_time = get("event_time", get("timestamp"))
+    if event_time is None:
+        raise ValueError("Telemetry record has no event_time or timestamp")
+    receive_time = get("receive_time")
+    # Backend records are available when ingest() is called. Replay uses event-time
+    # ordering, so missing receive_time is represented by the event time itself.
+    receive_time = event_time if receive_time is None else receive_time
     return Event(
         int(get("tr_id")),
-        timestamp(get("event_time"), timezone_name),
+        timestamp(event_time, timezone_name),
         number(get("lon")),
         number(get("lat")),
         speed if speed is not None and 0 <= speed <= 150 else None,
         number(get("heading")),
         bool(valid),
         str(get("packet_id", "")),
-        timestamp(get("receive_time"), timezone_name) if get("receive_time") else None,
+        timestamp(receive_time, timezone_name),
     )
 
 

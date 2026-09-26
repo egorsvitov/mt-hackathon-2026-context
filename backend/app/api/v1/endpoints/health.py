@@ -30,5 +30,7 @@ async def health_ready():
         "mode": pipeline.mode,
         "ingest_status": pipeline.ingest_status(),
         "ml_status": ml_client.status,
+        "map_matching_status": "ready" if pipeline.spatial is not None else "disabled",
+        "map_matching_error": pipeline.spatial_error,
     }
     return JSONResponse(body, status_code=200 if net.loaded else 503)

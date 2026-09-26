@@ -25,6 +25,7 @@ from app.services.incident_rules import REASONS, THRESHOLDS, diagnose, evidence,
 from app.services.incidents import IncidentTracker
 from app.services.ml_client import ml_client
 from app.services.network import NetworkStore, naive_to_epoch, to_dt, tr_out
+from route_matching import Catalog, MatchState, StreamingSpatialAdapter
 
 log = logging.getLogger(__name__)
 OFFSET = settings.TZ_OFFSET_HOURS * 3600
@@ -79,11 +80,17 @@ class Pipeline:
         self.incidents = IncidentTracker()
         self.evaluator: Evaluator | None = None
         self.replay = None  # ReplayFeeder, если идёт воспроизведение
+        self.spatial: StreamingSpatialAdapter | None = None
+        self.spatial_states: dict[str, MatchState] = {}
+        self.spatial_error: str | None = None
         self.reset()
 
     def reset(self) -> None:
         self.features.reset()
         self.incidents.reset()
+        if self.spatial is not None:
+            self.spatial.reset()
+        self.spatial_states.clear()
         self.predictions: dict[str, dict] = {}
         self.next_pred: dict[str, float] = {}
         self.event_times: deque = deque()
@@ -93,6 +100,30 @@ class Pipeline:
         self.reconnects = 0
         if self.evaluator:
             self.evaluator = Evaluator(self.evaluator.facts)
+
+    def load_spatial(self) -> None:
+        path_value = settings.ROUTE_CATALOG_PATH
+        if not path_value:
+            log.info("Map matching отключён: ROUTE_CATALOG_PATH не задан")
+            return
+        path = Path(path_value)
+        if not path.is_file():
+            self.spatial_error = f"catalog_not_found: {path}"
+            log.warning("Map matching отключён: нет каталога %s", path)
+            return
+        try:
+            self.spatial = StreamingSpatialAdapter(Catalog.load(path), graph=None)
+            self.spatial_error = None
+            log.info("Map matching: каталог %s загружен", self.spatial.catalog.version)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self.spatial = None
+            self.spatial_error = f"{type(exc).__name__}: {exc}"
+            log.exception("Map matching отключён: каталог не загрузился")
+
+    def close(self) -> None:
+        if self.spatial is not None:
+            self.spatial.close()
+            self.spatial = None
 
     def load_facts(self, split: str) -> None:
         """Факты прибытий — только для сверки в replay, в признаки не попадают."""
@@ -131,6 +162,13 @@ class Pipeline:
 
         arrival = self.features.ingest(rec)
         tr = rec.tr_id
+        if self.spatial is not None:
+            try:
+                self.spatial_states[tr] = self.spatial.update(rec)
+                self.spatial_error = self.spatial.last_error
+            except (KeyError, ValueError, RuntimeError) as exc:
+                self.spatial_error = f"{type(exc).__name__}: {exc}"
+                log.warning("Map matching update failed for tr_id=%s: %s", tr, exc)
         plan = self.network.plans.get(tr)
         if arrival and self.evaluator and plan is not None:
             self.evaluator.on_arrival(int(plan.visit_id[arrival.idx]), arrival)
@@ -244,12 +282,28 @@ class Pipeline:
             age = max(0.0, now - last[0])
             if age > 3600:
                 continue
+            spatial = self.spatial_states.get(tr)
+            matched = spatial is not None and spatial.max_event_time == last[0]
+            lat = (
+                spatial.matched_lat
+                if matched and spatial.matched_lat is not None
+                else spatial.lat if matched else None
+            )
+            lon = (
+                spatial.matched_lon
+                if matched and spatial.matched_lon is not None
+                else spatial.lon if matched else None
+            )
             out.append({
                 "tr_id": tr_out(tr), "unit_id": track.unit_id, "route_id": self.network.route_id(tr),
-                "event_time": to_dt(last[0]), "lat": last[1], "lon": last[2], "speed": last[3], "heading": last[4],
+                "event_time": to_dt(last[0]), "lat": lat if lat is not None else last[1],
+                "lon": lon if lon is not None else last[2], "speed": last[3], "heading": last[4],
                 "location_valid": True, "data_age_s": round(age, 1),
                 "status": "live" if age <= 60 else "stale" if age <= 300 else "offline",
                 "source": "replay" if self.mode == "replay" else "ndtp",
+                "route_pattern_id": spatial.route_pattern_id if matched else None,
+                "position_quality": spatial.position_quality if matched else "raw",
+                "off_route": spatial.off_route if matched else None,
             })
         return out
 
