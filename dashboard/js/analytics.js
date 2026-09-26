@@ -4,7 +4,8 @@
   'use strict';
 
   const $ = (id) => document.getElementById(id);
-  const IDS = ['an-mae-time', 'an-scatter', 'an-hist', 'an-confusion', 'an-routes', 'an-day', 'an-flow', 'an-latency'];
+  const IDS = ['an-mae-time', 'an-scatter', 'an-hist', 'an-confusion', 'an-routes', 'an-horizon', 'an-alert-lead', 'an-calib', 'an-causes',
+    'an-day', 'an-flow', 'an-latency', 'an-link'];
   const charts = {};
   const CLASS_ORDER = ['early', 'ontime', 'late'];
   const CLASS_LABEL = { early: 'Раньше графика', ontime: 'По графику', late: 'Опоздание' };
@@ -48,7 +49,8 @@
     axisLabel: { color: C.muted, fontSize: 10.5, hideOverlap: true, formatter: (v) => U.time(v / 1000) }, splitLine: { show: false },
   });
 
-  const legend = (C, data) => ({ data, top: 0, right: 8, icon: 'roundRect', itemWidth: 12, itemHeight: 3, textStyle: { color: C.text2, fontSize: 11 } });
+  const legend = (C, data, bars) => ({ data, top: 0, right: 8, icon: 'roundRect', itemWidth: bars ? 10 : 12, itemHeight: bars ? 10 : 3,
+    textStyle: { color: C.text2, fontSize: 11 } });
 
   function empty(chart, C, text) {
     chart.setOption({
@@ -59,6 +61,7 @@
 
   function render(App, s) {
     ensure();
+    const setHtml = (id, html) => { if (html !== App.html[id]) { App.html[id] = html; $(id).innerHTML = html; } };
     const C = App.colors;
     const now = App.now, dataNow = s.dataNow != null ? s.dataNow : now;
     const recs = App.src.predictionRecords(now, dataNow);
@@ -76,9 +79,7 @@
     const caught = lates.filter((r) => r.pred >= 60);
     const alarms = ver.filter((r) => r.pred >= 120);
     const falseAl = alarms.filter((r) => r.outcome < 60);
-    const leads = caught.map((r) => (r.outcome_at - r.as_of) / 60);
-    const lead = U.median(leads);
-    const late = App.src.kind === 'replay' ? 'демо-модель, замер при сборке' : m.ml_status === 'fallback' ? 'ML недоступен — упрощённый прогноз' : 'признаки + модель';
+    const late = App.src.kind === 'replay' ? (m.inference_latency_ms_p95 != null ? 'демо-модель, замер при сборке' : 'в воспроизведении не измеряется — см. LIVE') : m.ml_status === 'fallback' ? 'ML недоступен — упрощённый прогноз' : 'признаки + модель';
 
     const tile = (label, value, sub, hint) =>
       `<div class="kpi" title="${U.esc(hint || '')}"><span class="label">${label}</span><span class="value">${value}</span><span class="sub">${sub}</span></div>`;
@@ -91,15 +92,75 @@
         `${caught.length} из ${lates.length} фактических опозданий > 2 мин`, 'Доля фактических опозданий, для которых прогноз показывал риск (≥ 1 мин).'),
       tile('Ложные тревоги', pct(alarms.length ? falseAl.length / alarms.length : null),
         `${falseAl.length} из ${alarms.length} тревог «опоздание»`, 'Прогноз ≥ 2 мин, а по факту отставание меньше 1 мин.'),
-      tile('Предупреждение заранее', lead == null ? '—' : `${Math.round(lead)} мин`, 'до фактического прибытия, медиана',
-        'Сколько минут между прогнозом риска и фактическим опозданием.'),
+      tile('Проверено прогнозов', U.num(ver.length), `из ${U.num(recs.length)} выпущенных${m.arrival_detector_mae_s != null ? ` · детектор прибытий ±${Math.round(m.arrival_detector_mae_s)} с` : ''}`),
+    ].join('');
+    setHtml('an-kpis', kpis);
+
+    // ------------------------------------------------------------ горизонт и раннее предупреждение
+    // Плановый горизонт: от выпуска прогноза до планового прибытия к целевой остановке.
+    // Фактический: до реального прибытия (виден только после события). «Задним числом» — прогноз
+    // или тревога, выпущенные, когда ТС уже прибыло.
+    const planH = recs.map((r) => (r.target_time_begin - r.as_of) / 60);
+    const inWin = (x) => x >= 10 && x <= 15;
+    const planIn = planH.filter(inWin).length;
+    const factH = ver.map((r) => (r.outcome_at - r.as_of) / 60);
+    const retroPred = factH.filter((x) => x <= 0).length;
+    const incs = App.src.incidentRecords(now, dataNow);
+    // Раннее предупреждение — по каждому прибытию к целевой остановке: первый прогноз риска (≥ 1 мин)
+    // и фактическое опоздание > 2 мин. «До начала» — когда тревога появилась, ТС ещё шло по графику.
+    const firstFlag = new Map();
+    for (const r of ver) {
+      if (r.pred < 60) continue;
+      const key = `${r.tr_id}|${r.target_time_begin}`;
+      const f = firstFlag.get(key);
+      if (!f || r.as_of < f.as_of) firstFlag.set(key, r);
+    }
+    const warned = [...firstFlag.values()].filter((r) => r.outcome > 120);
+    const alertLead = warned.map((r) => (r.outcome_at - r.as_of) / 60);
+    const ahead = warned.filter((r) => (r.cur_dev || 0) < 60);
+    const hk = [
+      tile('Горизонт прогноза', pct(planH.length ? planIn / planH.length : null),
+        `прогнозов выпущено за 10–15 мин до планового прибытия · всего ${U.num(planH.length)}`,
+        'Цель прогноза — остановка, плановое прибытие к которой через 10–15 минут от момента прогноза.'),
+      tile('До фактического прибытия', factH.length ? `${Math.round(U.median(factH))} мин` : '—',
+        `медиана · в окне 10–15 мин: ${pct(factH.length ? factH.filter(inWin).length / factH.length : null)}`,
+        'От выпуска прогноза до реального прибытия. Опаздывающее ТС приходит позже плана, поэтому часть выходит за 15 мин.'),
+      tile('Тревога заранее', alertLead.length ? `${Math.round(U.median(alertLead))} мин` : '—',
+        `до фактического опоздания, медиана по ${U.num(warned.length)} прибытиям`,
+        'От первого прогноза риска (≥ 1 мин) по прибытию к остановке до самого прибытия с опозданием > 2 мин.'),
+      tile('Предсказано до начала', pct(warned.length ? ahead.length / warned.length : null),
+        `${U.num(ahead.length)} из ${U.num(warned.length)} опозданий: тревога, пока ТС шло по графику`,
+        'Опоздание предсказано до того, как ТС начало отставать (текущее отклонение в момент тревоги < 1 мин).'),
+      tile('Задним числом', U.num(retroPred),
+        retroPred ? `прогнозов после прибытия ТС: ${retroPred}` : 'ни одного прогноза после события',
+        'Прогноз, выпущенный, когда ТС уже прибыло к целевой остановке.'),
+    ].join('');
+    setHtml('an-kpis-horizon', hk);
+
+    // ------------------------------------------------------------ производительность и надёжность
+    const L = App.linkLog;
+    let drops = 0;
+    for (let k = 1; k < L.length; k++) if (L[k].down && !L[k - 1].down) drops++;
+    const onLine = s.vehicles.filter((v) => v.route_id && v.status !== 'offline');
+    const matched = onLine.filter((v) => v.route_pattern_id);
+    const offRoute = onLine.filter((v) => v.off_route).length;
+    const nowDown = !!s.down || !!s.backendDown;
+    const sk = [
       tile('Задержка обработки', m.inference_latency_ms_p95 != null ? `${U.num(m.inference_latency_ms_p95, 1)} мс` : '—',
         `p95 на один прогноз · ${late}`),
       tile('Поток телеметрии', m.packets_per_min != null ? `${U.num(m.packets_per_min)}` : '—',
-        `отметок/мин · ТС на связи ${m.vehicles_live != null ? m.vehicles_live : '—'}${m.reconnects ? ` · переподключений ${m.reconnects}` : ''}`),
-      tile('Проверено прогнозов', U.num(ver.length), `из ${U.num(recs.length)} выпущенных${m.arrival_detector_mae_s != null ? ` · детектор прибытий ±${Math.round(m.arrival_detector_mae_s)} с` : ''}`),
+        `отметок/мин · ТС на связи ${m.vehicles_live != null ? m.vehicles_live : '—'}`),
+      tile('Очередь обработки', m.queue_lag_s != null ? `${U.num(m.queue_lag_s, 1)} с` : '—',
+        m.queue_lag_s != null && m.queue_lag_s < 5 ? 'отставание от потока — очередь не копится' : 'отставание обработки от потока',
+        'На сколько секунд обработка отстаёт от последней принятой отметки.'),
+      tile('Связь с потоком', nowDown ? 'обрыв' : 'в норме',
+        `обрывов за сессию ${drops}${m.reconnects ? ` · переподключений ${m.reconnects}` : ''} · ${nowDown ? 'показано последнее известное состояние' : 'данные идут'}`,
+        'При обрыве сервис не падает: прогнозы помечаются устаревшими, дашборд показывает последнее известное состояние.'),
+      tile('Привязка к маршруту', onLine.length ? `${matched.length} из ${onLine.length}` : '—',
+        `ТС с определённым направлением рейса${offRoute ? ` · вне маршрута ${offRoute}` : ''}`,
+        'Map matching: направление рейса и положение на его геометрии.'),
     ].join('');
-    if (kpis !== App.html.anKpis) { App.html.anKpis = kpis; $('an-kpis').innerHTML = kpis; }
+    setHtml('an-kpis-system', sk);
     $('an-sub').textContent = App.src.kind === 'replay'
       ? `Воспроизведение дня ${App.meta.split}: с начала дня до ${U.time(now)}`
       : `Backend: сверенные прогнозы с начала воспроизведения, показатели системы — с открытия страницы`;
@@ -215,7 +276,7 @@
       charts['an-routes'].setOption({
         ...base(C),
         grid: { left: 80, right: 16, top: 28, bottom: 24 },
-        legend: legend(C, ['С моделью', 'Без модели']),
+        legend: legend(C, ['С моделью', 'Без модели'], true),
         tooltip: { ...base(C).tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (ps) => {
           const tr = rows[ps[0].dataIndex][0], r = App.net.routeByTr.get(tr);
           return `<b>ТС ${tr}</b>${r ? ` · ${U.esc(r.name)}` : ''}<br>` + ps.map((q) => `${q.marker}${q.seriesName}: <b>${U.num(q.value, 1)} мин</b>`).join('<br>') +
@@ -230,6 +291,147 @@
       }, true);
     } else empty(charts['an-routes'], C, 'Нет проверенных прогнозов');
 
+    // ------------------------------------------------------------ горизонт: гистограммы
+    const band = (lo, hi) => ({ silent: true, itemStyle: { color: C.s1, opacity: 0.08 }, data: [[{ xAxis: lo }, { xAxis: hi }]] });
+    const histo = (vals, lo, hi) => {
+      const out = [];
+      for (let x = lo; x < hi; x++) out.push([x + 0.5, 0]);
+      for (const v of vals) {
+        const k = Math.max(0, Math.min(out.length - 1, Math.floor(v) - lo));
+        out[k][1]++;
+      }
+      return out;
+    };
+    if (planH.length) {
+      const pl = histo(planH, 0, 30), fa = histo(factH, 0, 30);
+      charts['an-horizon'].setOption({
+        ...base(C),
+        grid: { left: 44, right: 16, top: 28, bottom: 40 },
+        legend: legend(C, ['До планового прибытия', 'До фактического прибытия'], true),
+        tooltip: { ...base(C).tooltip, trigger: 'axis', axisPointer: { type: 'shadow' },
+          formatter: (ps) => `<b>${Math.floor(ps[0].value[0])}–${Math.floor(ps[0].value[0]) + 1} мин</b><br>` +
+            ps.map((q) => `${q.marker}${q.seriesName}: <b>${U.num(q.value[1])}</b>`).join('<br>') },
+        xAxis: axisValue(C, { min: 0, max: 30, interval: 5, name: 'минут до события', nameLocation: 'middle', nameGap: 24 }),
+        yAxis: axisValue(C, { name: 'прогнозов' }),
+        series: [
+          { name: 'До планового прибытия', type: 'bar', data: pl, barWidth: '40%', itemStyle: { color: C.s1, borderRadius: [2, 2, 0, 0] }, markArea: band(10, 15) },
+          { name: 'До фактического прибытия', type: 'bar', data: fa, barWidth: '40%', itemStyle: { color: C.s2, borderRadius: [2, 2, 0, 0] } },
+        ],
+      }, true);
+    } else empty(charts['an-horizon'], C, 'Прогнозов пока нет');
+
+    if (alertLead.length) {
+      const hA = histo(ahead.map((r) => (r.outcome_at - r.as_of) / 60), 0, 30);
+      const hL = histo(warned.filter((r) => (r.cur_dev || 0) >= 60).map((r) => (r.outcome_at - r.as_of) / 60), 0, 30);
+      charts['an-alert-lead'].setOption({
+        ...base(C),
+        grid: { left: 44, right: 16, top: 28, bottom: 40 },
+        legend: legend(C, ['ТС ещё шло по графику', 'ТС уже отставало'], true),
+        tooltip: { ...base(C).tooltip, trigger: 'axis', axisPointer: { type: 'shadow' },
+          formatter: (ps) => `<b>за ${Math.floor(ps[0].value[0])}–${Math.floor(ps[0].value[0]) + 1} мин</b><br>` +
+            ps.map((q) => `${q.marker}${q.seriesName}: <b>${q.value[1]}</b>`).join('<br>') },
+        xAxis: axisValue(C, { min: 0, max: 30, interval: 5, name: 'минут до опоздания', nameLocation: 'middle', nameGap: 24 }),
+        yAxis: axisValue(C, { minInterval: 1, name: 'опозданий' }),
+        series: [
+          { name: 'ТС ещё шло по графику', type: 'bar', stack: 'a', data: hA, barWidth: '70%', markArea: band(10, 15),
+            itemStyle: { color: C.s1, borderColor: C.surface, borderWidth: 1 } },
+          { name: 'ТС уже отставало', type: 'bar', stack: 'a', data: hL, itemStyle: { color: C.s2, borderColor: C.surface, borderWidth: 1 } },
+        ],
+      }, true);
+    } else empty(charts['an-alert-lead'], C, 'Предсказанных опозданий пока нет:\nфакт появится после прибытия ТС');
+
+    // ------------------------------------------------------------ вероятность опоздания по прогнозу
+    // Эмпирическая вероятность: среди проверенных прогнозов с таким значением — доля каждого исхода.
+    if (ver.length) {
+      const edges = [-Infinity, -60, 0, 60, 120, 180, 300, Infinity];
+      const names = ['< −1', '−1…0', '0…1', '1…2', '2…3', '3…5', '> 5'];
+      const OUT = [
+        ['early', 'Раньше > 1 мин', (o) => o < -60], ['ok', 'По графику', (o) => o >= -60 && o <= 60],
+        ['warning', 'Риск 1–2 мин', (o) => o > 60 && o <= 120], ['critical', 'Опоздание > 2 мин', (o) => o > 120],
+      ];
+      const cnt = names.map(() => ({ n: 0, c: [0, 0, 0, 0] }));
+      for (const r of ver) {
+        let b = 0;
+        while (b < names.length - 1 && r.pred >= edges[b + 1]) b++;
+        cnt[b].n++;
+        cnt[b].c[OUT.findIndex((o) => o[2](r.outcome))]++;
+      }
+      const keep = names.map((_, i) => i).filter((i) => cnt[i].n >= 5);
+      charts['an-calib'].setOption({
+        ...base(C),
+        grid: { left: 44, right: 16, top: 44, bottom: 40 },
+        legend: legend(C, OUT.map((o) => o[1]), true),
+        tooltip: { ...base(C).tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (ps) => {
+          const x = cnt[keep[ps[0].dataIndex]];
+          return `прогноз <b>${names[keep[ps[0].dataIndex]]} мин</b> · ${U.num(x.n)} прогнозов<br>` +
+            ps.slice().reverse().map((q) => `${q.marker}${q.seriesName}: <b>${Math.round(q.value)}%</b>`).join('<br>');
+        } },
+        xAxis: { type: 'category', data: keep.map((i) => names[i]), axisLine: { lineStyle: { color: C.axis } }, axisTick: { show: false },
+          axisLabel: { color: C.text2, fontSize: 11 }, name: 'прогноз отклонения, мин', nameLocation: 'middle', nameGap: 24,
+          nameTextStyle: { color: C.muted, fontSize: 10.5 } },
+        yAxis: axisValue(C, { min: 0, max: 100, interval: 25, axisLabel: { color: C.muted, fontSize: 10.5, formatter: (v) => `${v}%` } }),
+        series: OUT.map(([k, name], oi) => ({
+          name, type: 'bar', stack: 'out', barWidth: '62%', itemStyle: { color: C[k], borderColor: C.surface, borderWidth: 1 },
+          data: keep.map((i) => (cnt[i].c[oi] / cnt[i].n) * 100),
+          label: oi === 3 ? { show: true, position: 'top', color: C.text2, fontSize: 10.5, formatter: (q) => (q.value >= 1 ? `${Math.round(q.value)}%` : '') } : undefined,
+        })),
+      }, true);
+    } else empty(charts['an-calib'], C, 'Нет проверенных прогнозов');
+
+    // ------------------------------------------------------------ причины тревог
+    if (incs.length) {
+      const byR = new Map();
+      for (const i of incs) {
+        const key = i.reason_title || 'Причина не определена';
+        const x = byR.get(key) || { yes: 0, no: 0, wait: 0 };
+        if (i.outcome == null) x.wait++;
+        else if (i.kind === 'early' ? i.outcome <= -60 : i.outcome >= 60) x.yes++;
+        else x.no++;
+        byR.set(key, x);
+      }
+      const tot = (x) => x.yes + x.no + x.wait;
+      const rows = [...byR.entries()].sort((a, b) => tot(a[1]) - tot(b[1]));
+      const ser = (key, name, color) => ({ name, type: 'bar', stack: 'r', data: rows.map(([, x]) => x[key]), barWidth: '56%',
+        itemStyle: { color, borderColor: C.surface, borderWidth: 1 } });
+      charts['an-causes'].setOption({
+        ...base(C),
+        grid: { left: 200, right: 16, top: 28, bottom: 24 },
+        legend: legend(C, ['Подтвердилось', 'Не подтвердилось', 'Ждём факт'], true),
+        tooltip: { ...base(C).tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (ps) => {
+          const x = rows[ps[0].dataIndex][1], done = x.yes + x.no;
+          return `<b>${U.esc(rows[ps[0].dataIndex][0])}</b><br>` + ps.map((q) => `${q.marker}${q.seriesName}: <b>${q.value}</b>`).join('<br>') +
+            (done ? `<br>подтверждается: <b>${pct(x.yes / done)}</b>` : '');
+        } },
+        xAxis: axisValue(C, { minInterval: 1, name: 'тревог' }),
+        yAxis: { type: 'category', data: rows.map(([k]) => k), axisLine: { show: false }, axisTick: { show: false },
+          axisLabel: { color: C.text2, fontSize: 11, width: 186, overflow: 'truncate' } },
+        series: [ser('yes', 'Подтвердилось', C.s1), ser('no', 'Не подтвердилось', C.s2), ser('wait', 'Ждём факт', C.muted)],
+      }, true);
+    } else empty(charts['an-causes'], C, 'Тревог пока не было');
+
+    // ------------------------------------------------------------ связь и свежесть данных
+    if (L.length >= 2) {
+      const areas = [];
+      for (let k = 0; k < L.length; k++) {
+        if (!L[k].down) continue;
+        let e = k;
+        while (e + 1 < L.length && L[e + 1].down) e++;
+        areas.push([{ xAxis: L[k].t * 1000 }, { xAxis: (L[e + 1] ? L[e + 1].t : L[e].t) * 1000 }]);
+        k = e;
+      }
+      charts['an-link'].setOption({
+        ...base(C),
+        tooltip: { ...base(C).tooltip, trigger: 'axis', formatter: (ps) =>
+          `<b>${U.time(ps[0].value[0] / 1000)}</b><br>последняя отметка: <b>${ps[0].value[1] != null ? U.dur(ps[0].value[1]) : '—'}</b> назад` },
+        xAxis: axisTime(C, L[0].t, L[L.length - 1].t),
+        yAxis: axisValue(C, { min: 0, name: 'с' }),
+        series: [{
+          type: 'line', step: 'end', symbol: 'none', data: L.map((x) => [x.t * 1000, x.age]), lineStyle: { width: 2, color: C.s1 },
+          markArea: { silent: true, itemStyle: { color: C.critical, opacity: 0.15 }, data: areas },
+        }],
+      }, true);
+    } else empty(charts['an-link'], C, 'Данные копятся с открытия страницы');
+
     // ------------------------------------------------------------ картина дня и система
     const h = App.src.dayHistory(now, dataNow);
     if (h.t.length) {
@@ -240,7 +442,7 @@
       });
       charts['an-day'].setOption({
         ...base(C),
-        legend: legend(C, ['critical', 'warning', 'early', 'ok'].map((k) => U.SEV[k].label)),
+        legend: legend(C, ['critical', 'warning', 'early', 'ok'].map((k) => U.SEV[k].label), true),
         tooltip: { ...base(C).tooltip, trigger: 'axis', formatter: (ps) => `<b>${U.time(ps[0].value[0] / 1000)}</b><br>` +
           ps.slice().reverse().map((q) => `${q.marker}${q.seriesName}: <b>${q.value[1]}</b>`).join('<br>') },
         xAxis: axisTime(C, h.t[0], now),
@@ -269,7 +471,8 @@
     } else {
       const ms = m.inference_latency_ms_p95;
       empty(charts['an-latency'], C, App.src.kind === 'replay'
-        ? `В воспроизведении задержку не измерить во времени:\nзамер демо-модели при сборке — ${ms != null ? U.num(ms, 1) : '—'} мс на прогноз`
+        ? (ms != null ? `В воспроизведении задержку не измерить во времени:\nзамер демо-модели при сборке — ${U.num(ms, 1)} мс на прогноз`
+          : 'В воспроизведении задержка не измеряется:\nреальный замер backend — в режиме LIVE')
         : 'Данные появятся через полминуты');
     }
   }

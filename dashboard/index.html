@@ -105,8 +105,8 @@
     <div class="page-head">
       <div><h1>Аналитика</h1><p id="an-sub">Качество прогноза и работа системы</p></div>
     </div>
-    <div class="an-kpis" id="an-kpis"></div>
     <h2 class="an-section">Качество прогноза</h2>
+    <div class="an-kpis" id="an-kpis"></div>
     <div class="an-grid">
       <figure class="an-card wide"><figcaption>Точность по времени суток <small>средняя ошибка прогноза, мин · окно 30 мин</small></figcaption><div class="an-chart" id="an-mae-time"></div></figure>
       <figure class="an-card"><figcaption>Прогноз против факта <small>каждая точка — проверенный прогноз, мин</small></figcaption><div class="an-chart" id="an-scatter"></div></figure>
@@ -114,11 +114,24 @@
       <figure class="an-card"><figcaption>Классы: прогноз и факт <small>доля внутри каждого фактического класса; пороги −1 и +2 мин</small></figcaption><div class="an-chart" id="an-confusion"></div></figure>
       <figure class="an-card"><figcaption>Точность по маршрутам <small>средняя ошибка, мин</small></figcaption><div class="an-chart" id="an-routes"></div></figure>
     </div>
-    <h2 class="an-section">Обстановка и система</h2>
+    <h2 class="an-section">Горизонт 10–15 минут и раннее предупреждение</h2>
+    <div class="an-kpis" id="an-kpis-horizon"></div>
+    <div class="an-grid">
+      <figure class="an-card"><figcaption>За сколько до события выпущен прогноз <small>мин; полоса — окно 10–15 мин</small></figcaption><div class="an-chart" id="an-horizon"></div></figure>
+      <figure class="an-card"><figcaption>Тревога об опоздании: за сколько до него <small>от первой тревоги до фактического прибытия с опозданием, мин</small></figcaption><div class="an-chart" id="an-alert-lead"></div></figure>
+    </div>
+    <h2 class="an-section">Вероятность опоздания и причины сбоев</h2>
+    <div class="an-grid">
+      <figure class="an-card"><figcaption>Что происходит по факту при таком прогнозе <small>доля исходов в каждом диапазоне прогноза</small></figcaption><div class="an-chart" id="an-calib"></div></figure>
+      <figure class="an-card"><figcaption>Причины тревог <small>подтвердилось ли отклонение по факту</small></figcaption><div class="an-chart" id="an-causes"></div></figure>
+    </div>
+    <h2 class="an-section">Производительность и надёжность</h2>
+    <div class="an-kpis" id="an-kpis-system"></div>
     <div class="an-grid">
       <figure class="an-card wide"><figcaption>Картина дня <small>маршруты по уровню риска, каждые 5 мин</small></figcaption><div class="an-chart" id="an-day"></div></figure>
       <figure class="an-card"><figcaption>Поток телеметрии <small>отметок в минуту</small></figcaption><div class="an-chart" id="an-flow"></div></figure>
       <figure class="an-card"><figcaption>Задержка обработки <small>признаки + модель на один прогноз, мс</small></figcaption><div class="an-chart" id="an-latency"></div></figure>
+      <figure class="an-card wide"><figcaption>Связь и свежесть данных <small>сколько секунд назад пришла последняя отметка; красным — обрыв связи</small></figcaption><div class="an-chart" id="an-link"></div></figure>
     </div>
   </section>
 

@@ -20,6 +20,7 @@
     ack: new Map(), // incident_id -> когда диспетчер взял в работу
     expanded: new Set(), // раскрытые карточки
     events: [], // журнал событий системы
+    linkLog: [], // связь и свежесть данных по времени (для «Аналитики»): {t, age, down, lag}
     prev: {},
   };
   window.App = App;
@@ -141,6 +142,19 @@
     if (App.events.length > 1000) App.events.pop();
   }
   App.logEvent = logEvent;
+
+  /** Точка «связь и свежесть данных» не чаще раза в 5 с модельного времени; при перемотке назад лог сбрасывается. */
+  function sampleLink(s) {
+    const L = App.linkLog, m = s.metrics || {}, now = App.now;
+    const last = L.length ? L[L.length - 1] : null;
+    if (last && now < last.t - 1) L.length = 0;
+    else if (last && now - last.t < 5) return;
+    L.push({
+      t: now, age: m.last_packet_at != null ? Math.max(0, now - m.last_packet_at) : null,
+      down: !!s.down || !!s.backendDown || (m.ingest_status != null && m.ingest_status !== 'ok'), lag: m.queue_lag_s != null ? m.queue_lag_s : null,
+    });
+    if (L.length > 5000) L.shift();
+  }
 
   function trackEvents(s) {
     const P = App.prev;
@@ -936,6 +950,7 @@
     App.snap = s;
     if (force) App.selChanged = true;
     trackEvents(s);
+    sampleLink(s);
     renderTop(s);
     renderBanner(s);
     if (App.view === 'dispatch') {
