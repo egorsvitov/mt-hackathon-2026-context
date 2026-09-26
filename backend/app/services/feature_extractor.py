@@ -174,10 +174,25 @@ class FeatureExtractor:
         v5 = track.mean_speed(t, 300)
         hour = ((t + settings.TZ_OFFSET_HOURS * 3600) % 86400) / 3600
         from_idx = arr.idx if arr else max(plan.last_planned(t), 0)
+        # Признаки модели, отсутствующие в исходном payload.
+        minute = (t + settings.TZ_OFFSET_HOURS * 3600) % 86400 / 60
+        cur = float(cur_dev) if cur_dev is not None else 0.0
+        prev = None
+        if from_idx > 0 and from_idx <= j:
+            prev = (plan.lat[from_idx - 1], plan.lon[from_idx - 1])
+        prev_lon = prev_lat = None
+        leg = prog = None
+        if prev is not None:
+            prev_lon, prev_lat = prev
+            leg = float(plan.plan[j] - plan.plan[from_idx - 1])
+            if last and dist is not None:
+                leg_len = haversine_m(prev_lat, prev_lon, plan.lat[j], plan.lon[j])
+                if leg_len > 1:
+                    prog = float(haversine_m(prev_lat, prev_lon, lat, lon) / leg_len)
         f = MLFeaturesPayload(
             tr_id=tr, t_timestamp=int(t), target_stop_id=str(int(plan.visit_id[j])),
             planned_arrival_time=int(plan.plan[j]),
-            current_delay_sec=float(cur_dev) if cur_dev is not None else 0.0,
+            current_delay_sec=cur,
             current_speed_kmh=float(speed or 0.0), avg_speed_segment=float(v5 or 0.0),
             dwell_time_sec=track.stationary(t), horizon_s=horizon,
             current_delay_known=cur_dev is not None, current_delay_age_s=(t - arr.t) if arr else None,
@@ -187,6 +202,16 @@ class FeatureExtractor:
             target_lat=float(plan.lat[j]), target_lon=float(plan.lon[j]), distance_to_target_m=dist,
             required_speed_kmh=(dist / max(horizon, 60.0) * 3.6) if dist is not None else None,
             near_stop_m=near, remaining_visits=j - from_idx, hour=hour,
+            cur_dev_abs_s=abs(cur), time_sin=math.sin(2 * math.pi * minute / 1440),
+            time_cos=math.cos(2 * math.pi * minute / 1440),
+            has_history=bool(track.points), has_valid_gps=last is not None,
+            packet_age_s=(t - track.last_event_t) if track.last_event_t is not None else None,
+            geo_lon_cell=math.floor(plan.lon[j] * 200) / 200 if plan.lon[j] is not None else None,
+            geo_lat_cell=math.floor(plan.lat[j] * 200) / 200 if plan.lat[j] is not None else None,
+            previous_stop_lon=prev_lon, previous_stop_lat=prev_lat,
+            target_leg_planned_s=leg, schedule_progress=prog,
+            last_speed=speed, last_lon=lon, last_lat=lat,
+            cur_dev_s=cur, last_heading=heading,
         )
         return f, {"target_idx": j, "from_idx": from_idx}
 

@@ -4,6 +4,20 @@
 #   python dashboard/tools/fetch_basemap.py                         # подложка карты (~60 МБ)
 # Запуск: DATA_DIR=<путь к датасету> docker compose up --build   ->  http://localhost:8080
 services:
+  ml-service:
+    build:
+      context: .
+      dockerfile: ml_service/Dockerfile
+    ports: ["${ML_PORT:-8001}:8001"]
+    environment:
+      MODEL_VERSION: ${MODEL_VERSION:-01_baseline}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 3
+
   ndtp-parser:
     build: ./ndtp-parser
     ports: ["${NDTP_PORT:-9201}:9201"]
@@ -26,6 +40,9 @@ services:
     volumes:
       - ${DATA_DIR:-../dataset}:/data:ro
       - ./dashboard/data:/refdata:ro
+    depends_on:
+      ml-service:
+        condition: service_healthy
 
   dashboard:
     build: ./dashboard
