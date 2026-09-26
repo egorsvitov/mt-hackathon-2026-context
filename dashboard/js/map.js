@@ -146,10 +146,6 @@
       // Невидимая широкая линия — чтобы по тонкому маршруту было легко попасть курсором.
       m.addLayer({ id: 'routes-hit', type: 'line', source: 'routes', paint: { 'line-width': 14, 'line-opacity': 0 } });
       m.addLayer({
-        id: 'stops', type: 'circle', source: 'stops',
-        paint: { 'circle-radius': ['get', 'r'], 'circle-color': C.surface, 'circle-stroke-color': C.text2, 'circle-stroke-width': 1.5 },
-      });
-      m.addLayer({
         id: 'sections-halo', type: 'line', source: 'sections', layout: round,
         paint: { 'line-color': C.page, 'line-width': 11, 'line-opacity': ['case', ['get', 'dim'], 0.2, 0.55] },
       });
@@ -160,6 +156,28 @@
       m.addLayer({
         id: 'sections-stale', type: 'line', source: 'sections', filter: ['get', 'stale'],
         paint: { 'line-color': bySev(['get', 'sev']), 'line-width': 6, 'line-dasharray': [1.4, 1], 'line-opacity': ['case', ['get', 'dim'], 0.3, 0.9] },
+      });
+      // Остановки — поверх линии участка, иначе ближайшие прячутся под ней.
+      // state: passed — пройдена; next — впереди до цели; target — цель прогноза; after — после цели; other — прочие.
+      const st = ['coalesce', ['get', 'state'], 'other'];
+      m.addLayer({
+        id: 'stops', type: 'circle', source: 'stops',
+        paint: {
+          'circle-radius': ['match', st, 'target', 7.5, 'next', 5, 'after', 4, 'passed', 3, ['get', 'r']],
+          'circle-color': ['match', st, 'target', ['get', 'color'], 'next', C.text, 'after', C.text2, 'passed', C.muted, C.surface],
+          'circle-stroke-color': ['match', st, 'other', C.text2, C.page],
+          'circle-stroke-width': ['match', st, 'target', 2.5, 'next', 2, 'other', 1.5, 1],
+          'circle-opacity': ['match', st, 'other', 0.7, 1],
+          'circle-stroke-opacity': ['match', st, 'other', 0.7, 1],
+        },
+      });
+      m.addLayer({
+        id: 'stop-labels', type: 'symbol', source: 'stops', filter: ['has', 'label'],
+        layout: {
+          'text-field': ['get', 'label'], 'text-font': ['Noto Sans Medium'], 'text-size': ['match', st, 'target', 12.5, 11],
+          'text-anchor': 'left', 'text-offset': [0.9, 0], 'text-optional': true, 'text-padding': 1,
+        },
+        paint: { 'text-color': ['match', st, 'target', C.text, C.text2], 'text-halo-color': C.page, 'text-halo-width': 1.8 },
       });
       m.addLayer({
         id: 'targets', type: 'circle', source: 'targets',
@@ -180,7 +198,7 @@
       const hover = {
         'routes-hit': (f) => this.h.routeTooltip(f.properties.tr_id),
         targets: (f) => f.properties.html,
-        stops: (f) => U.esc(f.properties.name),
+        stops: (f) => `<b>${U.esc(f.properties.name)}</b>${f.properties.tip ? `<br>${U.esc(f.properties.tip)}` : ''}`,
       };
       for (const [id, html] of Object.entries(hover)) {
         m.on('mousemove', id, (e) => {
@@ -249,10 +267,15 @@
     }
 
     /** list: [{lat, lon, name}]; small — мельче, когда показаны все остановки сети. */
+    /** list: [{lat, lon, name, state?, label?, tip?, color?}]; small — мельче, когда показаны все остановки сети. */
     setStops(list, small) {
-      this.setSource('stops', fc(list.map((s) => ({
-        type: 'Feature', properties: { name: s.name, r: small ? 2.5 : 3.5 }, geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
-      }))));
+      this.setSource('stops', fc(list.map((s) => {
+        const props = { name: s.name, r: small ? 2.5 : 3.5, state: s.state || 'other' };
+        if (s.label) props.label = s.label;
+        if (s.tip) props.tip = s.tip;
+        if (s.color) props.color = s.color;
+        return { type: 'Feature', properties: props, geometry: { type: 'Point', coordinates: [s.lon, s.lat] } };
+      })));
     }
 
     /** list: [{tr, lat, lon, html, z, sel, big, clickable}] — маркеры ТС (HTML поверх карты). */

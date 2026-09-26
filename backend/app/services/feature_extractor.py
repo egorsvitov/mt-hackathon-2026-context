@@ -174,6 +174,11 @@ class FeatureExtractor:
         v5 = track.mean_speed(t, 300)
         hour = ((t + settings.TZ_OFFSET_HOURS * 3600) % 86400) / 3600
         from_idx = arr.idx if arr else max(plan.last_planned(t), 0)
+        # Начало участка для дашборда — последнее прибытие по детектору. Если прибытий ещё нет, берём
+        # остановку, плановое время которой прошло больше 5 мин назад: по одному плану опаздывающий
+        # автобус оказался бы «проехавшим» остановку, до которой ещё не доехал. Признаки модели
+        # считаются от from_idx, как при обучении.
+        seg_from = arr.idx if arr else max(plan.last_planned(t - 300), 0)
         # Признаки модели, отсутствующие в исходном payload.
         minute = (t + settings.TZ_OFFSET_HOURS * 3600) % 86400 / 60
         cur = float(cur_dev) if cur_dev is not None else 0.0
@@ -213,7 +218,7 @@ class FeatureExtractor:
             last_speed=speed, last_lon=lon, last_lat=lat,
             cur_dev_s=cur, last_heading=heading,
         )
-        return f, {"target_idx": j, "from_idx": from_idx}
+        return f, {"target_idx": j, "from_idx": seg_from}
 
 
 def rule_features(f: MLFeaturesPayload) -> dict:

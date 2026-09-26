@@ -460,6 +460,68 @@
       `</svg>${tag}`;
   }
 
+  /**
+   * Где ТС на плане: индекс последней пройденной остановки и цели прогноза.
+   * Пройдена — если прибытие уже зафиксировано (факт / детектор прибытий) или ожидаемое время
+   * прибытия (план + ожидаемое отклонение) прошло больше минуты назад. Одного планового времени
+   * мало: опаздывающий автобус до «плановой» остановки ещё не доехал.
+   */
+  function progress(visits, p, now, dataNow) {
+    const n = visits.plan.length;
+    const t0 = p ? visits.pos.get(p.target_stop_id) : null;
+    const ti = t0 == null ? -1 : t0;
+    let last = -1;
+    for (let k = 0; k < n; k++) if (visits.fact[k] != null && visits.fact[k] <= dataNow && visits.plan[k] <= now + 1800) last = k;
+    while (last + 1 < n && last + 1 !== ti) {
+      const k = last + 1;
+      const d = expectedDelay(visits, p, k, ti, now);
+      if (visits.plan[k] + (d != null ? d : 0) < now - 60) last = k;
+      else break;
+    }
+    return { n, last, ti };
+  }
+  App._progress = progress; // для автопроверки
+
+  /** Ожидаемое отклонение на k-й остановке: от текущего к прогнозу на цели. */
+  function expectedDelay(visits, p, k, ti, now) {
+    if (!p) return null;
+    const c0 = p.cur_dev_s != null ? p.cur_dev_s : 0;
+    if (ti < 0) return c0;
+    if (k >= ti) return p.prediction_delay_s;
+    const f = (visits.plan[k] - now) / Math.max(1, visits.plan[ti] - now);
+    return c0 + (p.prediction_delay_s - c0) * Math.max(0, Math.min(1, f));
+  }
+
+  /** Состояние остановок выбранного маршрута для карты: пройдена / впереди / цель / после цели. */
+  function stopStates(tr, s) {
+    const out = new Map();
+    const visits = App.src.schedule(tr);
+    if (!visits) return out;
+    const p = s.predictions.get(tr);
+    const now = App.now, dataNow = s.dataNow != null ? s.dataNow : now;
+    const { n, last, ti } = progress(visits, p, now, dataNow);
+    for (let k = Math.max(0, last - 3); k <= last && k < n; k++) {
+      out.set(visits.stop[k], { state: 'passed', tip: `пройдена · по плану ${U.time(visits.plan[k])}` });
+    }
+    const end = ti >= 0 ? Math.min(n - 1, ti + 3) : Math.min(n - 1, last + 4);
+    for (let k = last + 1; k <= end; k++) {
+      const d = expectedDelay(visits, p, k, ti, now);
+      const exp = d != null ? visits.plan[k] + d : null;
+      const tip = `по плану ${U.time(visits.plan[k])}${exp != null ? ` · ожидается ${U.time(exp)}` : ''}`;
+      if (k === ti) {
+        out.set(visits.stop[k], {
+          state: 'target', color: App.colors[p.severity], tip: `цель прогноза · ${tip}`,
+          label: `${U.time(exp)} · ${U.delay(p.prediction_delay_s)}`,
+        });
+      } else if (ti < 0 || k < ti) {
+        out.set(visits.stop[k], { state: 'next', tip, label: U.time(exp != null ? exp : visits.plan[k]) });
+      } else if (!out.has(visits.stop[k])) {
+        out.set(visits.stop[k], { state: 'after', tip });
+      }
+    }
+    return out;
+  }
+
   function renderMap(s) {
     const dm = App.dmap;
     if (!dm || !dm.map) return;
@@ -487,27 +549,28 @@
         const visits = App.src.schedule(p.tr_id);
         if (!visits) continue;
         const i = visits.pos.get(p.segment.from_stop_id), j = visits.pos.get(p.segment.to_stop_id);
-        const tgt = App.net.stops.get(visits.stop[j]);
         list.push({
           tr: p.tr_id, sev: p.severity, stale: p.status === 'stale', dim: App.sel != null && App.sel !== p.tr_id,
-          paths: typeof App.net.sectionPaths === 'function' ? App.net.sectionPaths(p.tr_id, visits, i, j, activePatterns.get(p.tr_id)) : [],
-          // Show a rolling forecast target only for the selected vehicle.
-          target: p.tr_id === App.sel && tgt ? {
-            lat: tgt.lat, lon: tgt.lon,
-            html: `<b>${U.esc(tgt.name)}</b><br>ТС ${p.tr_id}: по плану ${U.time(p.target_time_begin)}, ожидается ${U.time(p.predicted_arrival)}`,
-          } : null,
+          paths: App.net.sectionPaths(p.tr_id, visits, i, j, activePatterns.get(p.tr_id)),
+          // Целевая остановка выбранного ТС выделяется в слое остановок; у остальных ТС маркер цели
+          // не рисуется: прогноз скользящий, и цели прыгали бы по карте.
+          target: null,
         });
       }
       dm.setSections(list);
     }
 
     const allStops = $('opt-stops').checked;
-    const stSig = `${App.sel}:${allStops}`;
+    const route = App.sel != null ? App.net.routeByTr.get(App.sel) : null;
+    const states = !allStops && route ? stopStates(App.sel, s) : new Map();
+    const stSig = `${App.sel}:${allStops}:${[...states].map(([k, x]) => `${k}${x.state}${x.label || ''}`).join()}`;
     if (stSig !== App.stopsSig) {
       App.stopsSig = stSig;
-      const route = App.sel != null ? App.net.routeByTr.get(App.sel) : null;
       const keys = allStops ? [...App.net.stops.keys()] : route ? route.stops : [];
-      dm.setStops(keys.map((k) => App.net.stops.get(k)).filter(Boolean), allStops);
+      dm.setStops(keys.map((k) => {
+        const st = App.net.stops.get(k);
+        return st && { ...st, ...(states.get(k) || {}) };
+      }).filter(Boolean), allStops);
     }
 
     const showOther = $('opt-other').checked;
@@ -770,12 +833,7 @@
     // Ближайшие остановки: пройденные — с фактом, впереди — план и ожидаемое время.
     let strip = '<div class="empty">Расписание загружается…</div>';
     if (visits) {
-      const n = visits.plan.length;
-      let lastFact = -1;
-      for (let k = 0; k < n; k++) if (visits.fact[k] != null && visits.fact[k] <= dataNow && visits.plan[k] <= now + 900) lastFact = k;
-      const lastPlan = U.countLE(visits.plan, now) - 1;
-      const last = Math.max(lastFact, Math.min(lastPlan, n - 1));
-      const ti = p ? visits.pos.get(p.target_stop_id) : -1;
+      const { n, last, ti } = progress(visits, p, now, dataNow);
       const from = Math.max(0, last - 2);
       const to = Math.min(n - 1, Math.max(ti, last + 1) + 3);
       const rowsHtml = [];
@@ -791,15 +849,8 @@
           cls = 'passed';
           tm = `${U.time(visits.plan[k])}`;
         } else {
-          let d = null;
-          if (p && ti >= 0) {
-            if (k === ti) d = p.prediction_delay_s;
-            else if (k < ti) {
-              const f = (visits.plan[k] - now) / Math.max(1, visits.plan[ti] - now);
-              const c0 = p.cur_dev_s != null ? p.cur_dev_s : 0;
-              d = c0 + (p.prediction_delay_s - c0) * Math.max(0, Math.min(1, f));
-            } else d = p.prediction_delay_s;
-          }
+          const d = expectedDelay(visits, p, k, ti, now);
+          if (ti >= 0 && k > ti) cls = 'after';
           tm = d == null ? U.time(visits.plan[k]) : `${U.time(visits.plan[k])} → <b>${k === ti ? '' : '≈'}${U.time(visits.plan[k] + d)}</b>`;
         }
         if (k === ti) cls += ' target';

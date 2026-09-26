@@ -489,7 +489,11 @@ def build(args):
     grid["detail"] = [d[1] for d in diag]
     grid["labelled"] = grid["sample_id"].isin(set(labels["sample_id"])) if labels is not None else False
     grid = grid.sort_values(["tr_id", "Tn"]).reset_index(drop=True)
-    grid["from_idx"] = grid["last_idx"].clip(lower=0)
+    # Участок начинается с последней остановки, до которой ТС реально доехало к T (факт <= T),
+    # а не с последней по плану: опаздывающий автобус до «плановой» остановки ещё не доехал.
+    reached = {tr: np.fmax.accumulate(np.nan_to_num(p.fact, nan=-np.inf)) for tr, p in split.plans.items()}
+    grid["from_idx"] = [max(0, int(np.searchsorted(reached[tr], T, side="right")) - 1)
+                        for tr, T in zip(grid["tr_id"], grid["Tn"])]
 
     # --- инциденты: эпизоды риска по ТС
     print("[4/6] Инциденты")

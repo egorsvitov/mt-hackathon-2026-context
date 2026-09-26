@@ -324,15 +324,17 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
 .stop {
   display: grid; grid-template-columns: 16px 1fr auto; gap: 0 8px; align-items: center; padding: 3px 0; font-size: 12px; position: relative;
 }
-.stop .pin { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--muted); background: var(--surface); justify-self: center; z-index: 1; }
+.stop .pin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--surface); background: var(--text); box-shadow: 0 0 0 1px var(--text-2); justify-self: center; z-index: 1; }
 .stop::before { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 2px; background: var(--border-strong); }
 .stop:first-child::before { top: 50%; }
 .stop:last-child::before { bottom: 50%; }
-.stop.passed .pin { background: var(--muted); }
+.stop.passed .pin { width: 7px; height: 7px; background: var(--muted); box-shadow: none; }
+.stop.after .pin { width: 8px; height: 8px; background: var(--text-2); box-shadow: none; }
+.stop.after .nm, .stop.after .tm { color: var(--text-2); }
 .stop.passed .nm { color: var(--muted); }
 .stop.now .pin { border-color: var(--accent); background: var(--accent); }
 .stop.target { background: color-mix(in srgb, var(--c) 12%, transparent); border-radius: 6px; }
-.stop.target .pin { width: 13px; height: 13px; border-color: var(--c); background: var(--c); }
+.stop.target .pin { width: 14px; height: 14px; background: var(--c); box-shadow: 0 0 0 1px var(--c); }
 .stop.target .nm { font-weight: 600; }
 .stop .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stop .tm { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; }
