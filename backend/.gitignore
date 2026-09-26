@@ -1,0 +1,41 @@
+# Виртуальное окружение (критично, чтобы не улетело в репозиторий)
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Байткод Python и кэш интерпретатора
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Переменные окружения и секреты
+.env
+.env.*
+!.env.example
+
+# Настройки IDE и редакторов
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Базы данных и временные файлы хранилища
+*.sqlite3
+*.db
+*.log
+
+# Кэш тестов и линтеров
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Специфика ОС
+.DS_Store
+Thumbs.db

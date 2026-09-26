@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Диспетчерская · Предиктор задержек</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%233987e5'/%3E%3Cpath d='M4 11l3-6 2 4 1.5-2L12 11z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="vendor/maplibre/maplibre-gl.css">
+  <link rel="stylesheet" href="css/style.css">
+  <script>
+    // Тема до отрисовки, чтобы не мигало. По умолчанию — тёмная (диспетчерская).
+    try { const t = localStorage.getItem('dash-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">◆</div>
+      <div><b>Предиктор задержек</b><small>Диспетчерская · прогноз за 10–15 мин</small></div>
+    </div>
+    <div class="mode" id="mode-badge"><span class="dot"></span>…</div>
+    <div class="clock"><span id="clock-time" class="num">--:--:--</span><small id="clock-date"></small></div>
+    <div class="playback" id="playback">
+      <button class="iconbtn" id="btn-play" title="Пауза / пуск (пробел)" aria-label="Пауза">❚❚</button>
+      <div class="seg" id="speed" role="group" aria-label="Скорость воспроизведения">
+        <button data-speed="1">×1</button>
+        <button data-speed="10">×10</button>
+        <button data-speed="60">×60</button>
+        <button data-speed="300">×300</button>
+      </div>
+      <input type="range" id="scrub" aria-label="Время воспроизведения">
+    </div>
+    <div class="top-actions">
+      <button class="ghost" id="btn-link" title="Имитация обрыва связи с источником телеметрии: сервис переходит на последнее известное состояние">Обрыв связи</button>
+      <button class="ghost" id="btn-theme" title="Светлая / тёмная тема">Тема</button>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <section class="kpis" id="kpis" aria-label="Сводка"></section>
+
+  <main class="main">
+    <div class="map-wrap">
+      <div id="map" aria-label="Карта маршрутной сети"></div>
+      <div class="map-overlay legend" id="legend"></div>
+      <div class="map-overlay map-hint" id="map-hint" hidden></div>
+      <div class="map-overlay maptools">
+        <label><input type="checkbox" id="opt-other" checked> ТС без расписания</label>
+        <label><input type="checkbox" id="opt-stops"> Все остановки</label>
+      </div>
+    </div>
+    <aside class="side">
+      <nav class="tabs" id="tabs">
+        <button data-tab="incidents" class="on">Инциденты<span class="cnt" id="n-inc">0</span></button>
+        <button data-tab="routes">Маршруты<span class="cnt" id="n-routes">0</span></button>
+        <button data-tab="verified">Проверка<span class="cnt" id="n-ver">0</span></button>
+      </nav>
+      <div class="tab-body" id="tab-incidents"></div>
+      <div class="tab-body" id="tab-routes" hidden></div>
+      <div class="tab-body" id="tab-verified" hidden></div>
+    </aside>
+  </main>
+
+  <section class="drawer" id="drawer" hidden>
+    <div class="drawer-head" id="drawer-head"></div>
+    <div class="drawer-body">
+      <div>
+        <div class="pane-title"><span>Линейка рейса</span><span class="lg">план · прогноз</span></div>
+        <div class="strip" id="strip"></div>
+      </div>
+      <div>
+        <div class="pane-title">
+          <span>Отклонение от графика, мин</span>
+          <span class="lg"><span><i style="--c:var(--s1)"></i>факт</span><span><i style="--c:var(--s2)"></i>прогноз</span></span>
+        </div>
+        <div class="chart" id="chart-dev"></div>
+      </div>
+      <div>
+        <div class="pane-title"><span>Скорость, км/ч</span><span class="lg"><span><i style="--c:var(--s1)"></i>скорость, ср. за 1 мин</span><span><i style="--c:var(--muted)"></i>норма</span></span></div>
+        <div class="chart" id="chart-speed"></div>
+      </div>
+      <div class="pane-ev">
+        <div class="pane-title"><span>Признаки на момент прогноза</span></div>
+        <div class="ev" id="evidence"></div>
+      </div>
+    </div>
+  </section>
+
+  <script src="config.js" onerror="void 0"></script>
+  <script src="vendor/maplibre/maplibre-gl.js"></script>
+  <script src="vendor/protomaps/pmtiles.js"></script>
+  <script src="vendor/protomaps/basemaps.js"></script>
+  <script src="vendor/echarts.min.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/source-replay.js"></script>
+  <script src="js/source-api.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
