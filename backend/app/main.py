@@ -10,7 +10,9 @@ from app.core.config import settings
 from app.services.pipeline import pipeline
 from app.services.replay import ReplayFeeder
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
 log = logging.getLogger(__name__)
 
 

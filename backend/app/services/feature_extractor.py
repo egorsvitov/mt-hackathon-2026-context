@@ -27,10 +27,14 @@ class VehicleTrack:
     def __init__(self, unit_id: int | None = None):
         self.unit_id = unit_id
         self.points: deque = deque()  # (t, lat, lon, speed, heading)
-        self.last_event_t: float | None = None  # последняя запись, даже без валидных координат
+        self.last_event_t: float | None = (
+            None  # последняя запись, даже без валидных координат
+        )
 
     def add(self, t: float, lat, lon, speed, heading, valid: bool) -> bool:
-        self.last_event_t = t if self.last_event_t is None else max(self.last_event_t, t)
+        self.last_event_t = (
+            t if self.last_event_t is None else max(self.last_event_t, t)
+        )
         if not valid or lat is None or lon is None:
             return False
         if self.points and t <= self.points[-1][0]:
@@ -89,24 +93,39 @@ class ArrivalTracker:
         p = self.plan
         n = len(p.plan)
         early, late = settings.ARRIVAL_EARLY_SEC, settings.ARRIVAL_LATE_SEC
-        if self.k is None:  # первое наблюдение (или старт посреди дня) — ищем от текущего времени
+        if (
+            self.k is None
+        ):  # первое наблюдение (или старт посреди дня) — ищем от текущего времени
             self.k = int(np.searchsorted(p.plan, t - late))
         while self.k < n and p.plan[self.k] < t - late:
             self.k += 1
         end = min(n, self.k + self.LOOKAHEAD)
         if self.k >= end:
             return None
-        d = haversine_m(lat, lon, p.lat[self.k:end], p.lon[self.k:end])
-        cands = [j for j in range(self.k, end)
-                 if d[j - self.k] <= settings.ARRIVAL_RADIUS_M and -early <= t - p.plan[j] <= late]
+        d = haversine_m(lat, lon, p.lat[self.k : end], p.lon[self.k : end])
+        cands = [
+            j
+            for j in range(self.k, end)
+            if d[j - self.k] <= settings.ARRIVAL_RADIUS_M
+            and -early <= t - p.plan[j] <= late
+        ]
         if not cands:
-            if self.inside is not None and haversine_m(lat, lon, p.lat[self.inside], p.lon[self.inside]) > settings.ARRIVAL_RADIUS_M:
+            if (
+                self.inside is not None
+                and haversine_m(lat, lon, p.lat[self.inside], p.lon[self.inside])
+                > settings.ARRIVAL_RADIUS_M
+            ):
                 self.inside = None
             return None
         j = min(cands, key=lambda c: abs(t - p.plan[c]))
         # Повторное посещение той же остановки (отстой на конечной): засчитываем не раньше
         # чем за минуту до плана, пока ТС стоит в геозоне.
-        if j > 0 and p.stop[j] == p.stop[j - 1] and self.inside == j - 1 and t < p.plan[j] - 60:
+        if (
+            j > 0
+            and p.stop[j] == p.stop[j - 1]
+            and self.inside == j - 1
+            and t < p.plan[j] - 60
+        ):
             return None
         a = Arrival(j, t, t - p.plan[j])
         self.arrivals.append(a)
@@ -137,7 +156,9 @@ class FeatureExtractor:
         track = self.tracks.get(tr)
         if track is None:
             track = self.tracks[tr] = VehicleTrack(rec.unit_id)
-        ok = track.add(rec.timestamp, rec.lat, rec.lon, rec.speed, rec.heading, rec.location_valid)
+        ok = track.add(
+            rec.timestamp, rec.lat, rec.lon, rec.speed, rec.heading, rec.location_valid
+        )
         plan = self.network.plans.get(tr)
         if not ok or plan is None:
             return None
@@ -146,7 +167,9 @@ class FeatureExtractor:
             tracker = self.trackers[tr] = ArrivalTracker(plan)
         return tracker.update(rec.timestamp, rec.lat, rec.lon)
 
-    def extract_features(self, tr: str, t: float) -> tuple[MLFeaturesPayload, dict] | None:
+    def extract_features(
+        self, tr: str, t: float
+    ) -> tuple[MLFeaturesPayload, dict] | None:
         """Признаки на момент T и служебный контекст (индексы посещений) или None, если цели нет."""
         plan = self.network.plans.get(tr)
         track = self.tracks.get(tr)
@@ -169,7 +192,16 @@ class FeatureExtractor:
             rs = self.network.routes.get(tr, {}).get("stops") or []
             if rs:
                 st = [self.network.stops[k] for k in rs if k in self.network.stops]
-                near = float(np.min(haversine_m(lat, lon, np.array([s["lat"] for s in st]), np.array([s["lon"] for s in st]))))
+                near = float(
+                    np.min(
+                        haversine_m(
+                            lat,
+                            lon,
+                            np.array([s["lat"] for s in st]),
+                            np.array([s["lon"] for s in st]),
+                        )
+                    )
+                )
         horizon = float(plan.plan[j] - t)
         v5 = track.mean_speed(t, 300)
         hour = ((t + settings.TZ_OFFSET_HOURS * 3600) % 86400) / 3600
@@ -195,28 +227,58 @@ class FeatureExtractor:
                 if leg_len > 1:
                     prog = float(haversine_m(prev_lat, prev_lon, lat, lon) / leg_len)
         f = MLFeaturesPayload(
-            tr_id=tr, t_timestamp=int(t), target_stop_id=str(int(plan.visit_id[j])),
+            tr_id=tr,
+            t_timestamp=int(t),
+            target_stop_id=str(int(plan.visit_id[j])),
             planned_arrival_time=int(plan.plan[j]),
             current_delay_sec=cur,
-            current_speed_kmh=float(speed or 0.0), avg_speed_segment=float(v5 or 0.0),
-            dwell_time_sec=track.stationary(t), horizon_s=horizon,
-            current_delay_known=cur_dev is not None, current_delay_age_s=(t - arr.t) if arr else None,
-            delay_trend_15m_s=(cur_dev - (arr15.dev if arr15 else 0.0)) if cur_dev is not None else None,
-            speed_15m_kmh=track.mean_speed(t, 900), speed_norm_kmh=self.network.speed_norm(tr),
-            gps_age_s=gps_age, lat=lat, lon=lon, heading=heading,
-            target_lat=float(plan.lat[j]), target_lon=float(plan.lon[j]), distance_to_target_m=dist,
-            required_speed_kmh=(dist / max(horizon, 60.0) * 3.6) if dist is not None else None,
-            near_stop_m=near, remaining_visits=j - from_idx, hour=hour,
-            cur_dev_abs_s=abs(cur), time_sin=math.sin(2 * math.pi * minute / 1440),
+            current_speed_kmh=float(speed or 0.0),
+            avg_speed_segment=float(v5 or 0.0),
+            dwell_time_sec=track.stationary(t),
+            horizon_s=horizon,
+            current_delay_known=cur_dev is not None,
+            current_delay_age_s=(t - arr.t) if arr else None,
+            delay_trend_15m_s=(cur_dev - (arr15.dev if arr15 else 0.0))
+            if cur_dev is not None
+            else None,
+            speed_15m_kmh=track.mean_speed(t, 900),
+            speed_norm_kmh=self.network.speed_norm(tr),
+            gps_age_s=gps_age,
+            lat=lat,
+            lon=lon,
+            heading=heading,
+            target_lat=float(plan.lat[j]),
+            target_lon=float(plan.lon[j]),
+            distance_to_target_m=dist,
+            required_speed_kmh=(dist / max(horizon, 60.0) * 3.6)
+            if dist is not None
+            else None,
+            near_stop_m=near,
+            remaining_visits=j - from_idx,
+            hour=hour,
+            cur_dev_abs_s=abs(cur),
+            time_sin=math.sin(2 * math.pi * minute / 1440),
             time_cos=math.cos(2 * math.pi * minute / 1440),
-            has_history=bool(track.points), has_valid_gps=last is not None,
-            packet_age_s=(t - track.last_event_t) if track.last_event_t is not None else None,
-            geo_lon_cell=math.floor(plan.lon[j] * 200) / 200 if plan.lon[j] is not None else None,
-            geo_lat_cell=math.floor(plan.lat[j] * 200) / 200 if plan.lat[j] is not None else None,
-            previous_stop_lon=prev_lon, previous_stop_lat=prev_lat,
-            target_leg_planned_s=leg, schedule_progress=prog,
-            last_speed=speed, last_lon=lon, last_lat=lat,
-            cur_dev_s=cur, last_heading=heading,
+            has_history=bool(track.points),
+            has_valid_gps=last is not None,
+            packet_age_s=(t - track.last_event_t)
+            if track.last_event_t is not None
+            else None,
+            geo_lon_cell=math.floor(plan.lon[j] * 200) / 200
+            if plan.lon[j] is not None
+            else None,
+            geo_lat_cell=math.floor(plan.lat[j] * 200) / 200
+            if plan.lat[j] is not None
+            else None,
+            previous_stop_lon=prev_lon,
+            previous_stop_lat=prev_lat,
+            target_leg_planned_s=leg,
+            schedule_progress=prog,
+            last_speed=speed,
+            last_lon=lon,
+            last_lat=lat,
+            cur_dev_s=cur,
+            last_heading=heading,
         )
         return f, {"target_idx": j, "from_idx": seg_from}
 

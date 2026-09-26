@@ -34,12 +34,16 @@ class Settings(BaseSettings):
     TZ_OFFSET_HOURS: int = 3
 
     # Онлайн-контур
-    PREDICT_EVERY_SEC: int = 60  # как часто выпускать прогноз по каждому ТС (по времени событий)
+    PREDICT_EVERY_SEC: int = (
+        60  # как часто выпускать прогноз по каждому ТС (по времени событий)
+    )
     ARRIVAL_RADIUS_M: float = 40.0  # геозона остановки для детектора прибытий
     # Прибытие ищется от 7 мин раньше плана до 13 мин позже (на test: MAE детектора 22 с против факта)
     ARRIVAL_EARLY_SEC: int = 420
     ARRIVAL_LATE_SEC: int = 780
-    INGEST_DOWN_AFTER_SEC: float = 15.0  # столько секунд без пакетов — поток считается оборванным
+    INGEST_DOWN_AFTER_SEC: float = (
+        15.0  # столько секунд без пакетов — поток считается оборванным
+    )
 
     # Воспроизведение исторического дня (CSV replay) — пока нет живого NDTP-потока
     REPLAY_AUTOSTART: bool = True

@@ -28,7 +28,6 @@ class Episode:
     closed_at: float | None = None
     calm: int = 0
     outcome_delay_s: float | None = None
-    history: list = field(default_factory=list)
 
 
 class IncidentTracker:
@@ -52,7 +51,15 @@ class IncidentTracker:
             ep = None
         if kind:
             if ep is None and (sev == "critical" or self.prev_kind.get(tr) == kind):
-                ep = Episode(f"INC-{tr}-{int(pred['as_of'])}", tr, kind, pred["as_of"], pred, pred, sev)
+                ep = Episode(
+                    f"INC-{tr}-{int(pred['as_of'])}",
+                    tr,
+                    kind,
+                    pred["as_of"],
+                    pred,
+                    pred,
+                    sev,
+                )
                 self.active[tr] = ep
             if ep:
                 ep.current = ep.alert = pred
@@ -84,5 +91,7 @@ class IncidentTracker:
                 ep.outcome_delay_s = outcome
 
     def visible(self, now: float) -> list[Episode]:
-        self.resolved = [e for e in self.resolved if e.closed_at > now - KEEP_RESOLVED_SEC]
+        self.resolved = [
+            e for e in self.resolved if e.closed_at > now - KEEP_RESOLVED_SEC
+        ]
         return list(self.active.values()) + self.resolved

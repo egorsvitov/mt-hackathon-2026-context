@@ -2,13 +2,23 @@
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas.dashboard import Config, Metrics, Network, Prediction, Schedule, Vehicle, Verified
+from app.schemas.dashboard import (
+    Config,
+    Metrics,
+    Network,
+    Prediction,
+    Schedule,
+    Vehicle,
+    Verified,
+)
 from app.services.pipeline import pipeline
 
 router = APIRouter()
 
 
-@router.get("/network", response_model=Network, response_model_by_alias=True, tags=["dashboard"])
+@router.get(
+    "/network", response_model=Network, response_model_by_alias=True, tags=["dashboard"]
+)
 async def get_network():
     """Остановки и геометрия маршрутов (маршрут = нитка ТС). Загружается дашбордом один раз."""
     return pipeline.network.network_payload()
@@ -36,8 +46,12 @@ async def get_predictions():
 
 
 @router.get("/predictions/verified", response_model=list[Verified], tags=["dashboard"])
-async def get_verified(limit: int = Query(80, ge=1, le=20000),
-                       all: bool = Query(False, description="true — все прогнозы, иначе только 5-минутная сетка")):
+async def get_verified(
+    limit: int = Query(80, ge=1, le=20000),
+    all: bool = Query(
+        False, description="true — все прогнозы, иначе только 5-минутная сетка"
+    ),
+):
     """Прогнозы, сверенные с фактом прибытия (replay), новые сверху."""
     return pipeline.verified_out(limit, all)
 
@@ -55,11 +69,18 @@ async def get_config():
 
 
 @router.post("/demo/start", tags=["demo"])
-async def demo_start(speed: float = Query(1.0, ge=0, le=600), t: str | None = Query(None, description="Время старта, ЧЧ:ММ")):
+async def demo_start(
+    speed: float = Query(1.0, ge=0, le=600),
+    t: str | None = Query(None, description="Время старта, ЧЧ:ММ"),
+):
     """Запустить воспроизведение исторического дня из CSV (заново, с указанного времени)."""
     replay = pipeline.replay
     await replay.start(speed, t)
-    return {"status": "running", "speed": replay.speed, "now": pipeline.metrics_out()["now"]}
+    return {
+        "status": "running",
+        "speed": replay.speed,
+        "now": pipeline.metrics_out()["now"],
+    }
 
 
 @router.post("/demo/speed", tags=["demo"])
@@ -79,7 +100,11 @@ async def demo_stop():
 
 
 @router.post("/demo/link", tags=["demo"])
-async def demo_link(down: bool = Query(..., description="true — имитировать обрыв потока, false — восстановить")):
+async def demo_link(
+    down: bool = Query(
+        ..., description="true — имитировать обрыв потока, false — восстановить"
+    ),
+):
     """Имитация обрыва связи с источником телеметрии (часы идут, пакеты не приходят)."""
     pipeline.replay.set_link(down)
     return {"ingest_status": pipeline.ingest_status()}

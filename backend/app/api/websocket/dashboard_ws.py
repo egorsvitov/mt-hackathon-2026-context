@@ -4,7 +4,6 @@ ws_router = APIRouter()
 
 
 class ConnectionManager:
-
     def __init__(self):
         self.active_connections: list[WebSocket] = []
 

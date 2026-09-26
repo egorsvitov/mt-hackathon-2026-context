@@ -16,16 +16,27 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from route_matching import Catalog, MatchState, StreamingSpatialAdapter
 
 from app.api.websocket.dashboard_ws import manager
 from app.core.config import settings
 from app.schemas.telemetry import RawNDTPRecord
-from app.services.feature_extractor import Arrival, FeatureExtractor, finite, rule_features
-from app.services.incident_rules import REASONS, THRESHOLDS, diagnose, evidence, severity_of
+from app.services.feature_extractor import (
+    Arrival,
+    FeatureExtractor,
+    finite,
+    rule_features,
+)
+from app.services.incident_rules import (
+    REASONS,
+    THRESHOLDS,
+    diagnose,
+    evidence,
+    severity_of,
+)
 from app.services.incidents import IncidentTracker
 from app.services.ml_client import ml_client
 from app.services.network import NetworkStore, naive_to_epoch, to_dt, tr_out
-from route_matching import Catalog, MatchState, StreamingSpatialAdapter
 
 log = logging.getLogger(__name__)
 OFFSET = settings.TZ_OFFSET_HOURS * 3600
@@ -43,7 +54,9 @@ class Evaluator:
         self.facts = facts
         self.pending: list = []
         self.seq = itertools.count()
-        self.verified: deque = deque(maxlen=20000)  # все сверенные прогнозы (для аналитики и журнала)
+        self.verified: deque = deque(
+            maxlen=20000
+        )  # все сверенные прогнозы (для аналитики и журнала)
         self.sum_err = self.sum_base = 0.0
         self.n = self.n5 = 0
         self.det_err = 0.0
@@ -53,7 +66,10 @@ class Evaluator:
         fact = self.facts.get(p["target_stop_id"])
         if fact is None:
             return
-        heapq.heappush(self.pending, (max(fact, p["as_of"]), next(self.seq), p, fact - p["target_time_begin"]))
+        heapq.heappush(
+            self.pending,
+            (max(fact, p["as_of"]), next(self.seq), p, fact - p["target_time_begin"]),
+        )
 
     def advance(self, now: float, incidents: IncidentTracker) -> None:
         while self.pending and self.pending[0][0] <= now:
@@ -130,8 +146,15 @@ class Pipeline:
         path = Path(settings.DATA_DIR) / split / "schedule.csv"
         if not settings.REPLAY_EVALUATE or not path.exists():
             return
-        df = pd.read_csv(path, usecols=["tt_action_item_id", "time_fact_begin"]).dropna()
-        facts = dict(zip(df["tt_action_item_id"].astype(np.int64).tolist(), naive_to_epoch(df["time_fact_begin"]).tolist()))
+        df = pd.read_csv(
+            path, usecols=["tt_action_item_id", "time_fact_begin"]
+        ).dropna()
+        facts = dict(
+            zip(
+                df["tt_action_item_id"].astype(np.int64).tolist(),
+                naive_to_epoch(df["time_fact_begin"]).tolist(),
+            )
+        )
         self.evaluator = Evaluator(facts)
 
     # ------------------------------------------------------------------ часы и статус
@@ -146,7 +169,10 @@ class Pipeline:
     def ingest_status(self) -> str:
         if self.mode == "replay":
             return "down" if self.replay.link_down else "ok"
-        if self.last_packet_wall is None or time.time() - self.last_packet_wall > settings.INGEST_DOWN_AFTER_SEC:
+        if (
+            self.last_packet_wall is None
+            or time.time() - self.last_packet_wall > settings.INGEST_DOWN_AFTER_SEC
+        ):
             return "down"
         return "ok"
 
@@ -155,7 +181,9 @@ class Pipeline:
     async def ingest(self, rec: RawNDTPRecord) -> None:
         t = float(rec.timestamp)
         self.last_packet_wall = time.time()
-        self.last_event_t = t if self.last_event_t is None else max(self.last_event_t, t)
+        self.last_event_t = (
+            t if self.last_event_t is None else max(self.last_event_t, t)
+        )
         self.event_times.append(t)
         while self.event_times and self.event_times[0] < self.last_event_t - 60:
             self.event_times.popleft()
@@ -198,18 +226,37 @@ class Pipeline:
         name = self.network.stop_name
         elapsed = time.perf_counter() - t0
         p = {
-            "sample_id": f"{tr}_{int(T + OFFSET)}", "tr_id": tr, "route_id": self.network.route_id(tr),
-            "as_of": T, "generated_at": T + elapsed,
-            "target_stop_id": int(plan.visit_id[j]), "target_stop_name": name(plan.stop[j]),
-            "target_time_begin": float(plan.plan[j]), "horizon_s": float(plan.plan[j] - T),
-            "prediction_delay_s": round(pred, 1), "predicted_arrival": float(plan.plan[j] + pred),
+            "sample_id": f"{tr}_{int(T + OFFSET)}",
+            "tr_id": tr,
+            "route_id": self.network.route_id(tr),
+            "as_of": T,
+            "generated_at": T + elapsed,
+            "target_stop_id": int(plan.visit_id[j]),
+            "target_stop_name": name(plan.stop[j]),
+            "target_time_begin": float(plan.plan[j]),
+            "horizon_s": float(plan.plan[j] - T),
+            "prediction_delay_s": round(pred, 1),
+            "predicted_arrival": float(plan.plan[j] + pred),
             "late_probability": _r(ml.late_probability, 3),
-            "cur_dev_s": _r(rf["cur_dev_s"], 0), "cur_dev_source": "detector" if f.current_delay_known else "none",
-            "severity": sev, "status": ml.status, "model_version": ml.model_version, "data_age_s": _r(f.gps_age_s, 0),
-            "segment": {"from_stop_id": int(plan.visit_id[i]), "from_stop_name": name(plan.stop[i]),
-                        "to_stop_id": int(plan.visit_id[j]), "to_stop_name": name(plan.stop[j])},
-            "reason": {"code": code, "title": REASONS[code]["title"], "detail": detail} if code else None,
-            "evidence": [{**e, "value": _r(e["value"]), "norm": _r(e["norm"])} for e in evidence(rf, code)],
+            "cur_dev_s": _r(rf["cur_dev_s"], 0),
+            "cur_dev_source": "detector" if f.current_delay_known else "none",
+            "severity": sev,
+            "status": ml.status,
+            "model_version": ml.model_version,
+            "data_age_s": _r(f.gps_age_s, 0),
+            "segment": {
+                "from_stop_id": int(plan.visit_id[i]),
+                "from_stop_name": name(plan.stop[i]),
+                "to_stop_id": int(plan.visit_id[j]),
+                "to_stop_name": name(plan.stop[j]),
+            },
+            "reason": {"code": code, "title": REASONS[code]["title"], "detail": detail}
+            if code
+            else None,
+            "evidence": [
+                {**e, "value": _r(e["value"]), "norm": _r(e["norm"])}
+                for e in evidence(rf, code)
+            ],
             "recommendation": REASONS[code]["recommendation"] if code else None,
         }
         self.predictions[tr] = p
@@ -218,7 +265,9 @@ class Pipeline:
             self.evaluator.register(p)
         self.latencies.append((time.perf_counter() - t0) * 1000)
         if manager.active_connections:
-            await manager.broadcast({"type": "prediction", "prediction": self._pred_json(p)})
+            await manager.broadcast(
+                {"type": "prediction", "prediction": self._pred_json(p)}
+            )
 
     # ------------------------------------------------------------------ ответы API
 
@@ -232,17 +281,28 @@ class Pipeline:
                 self.incidents.drop(tr, now)
                 continue
             if down:
-                p = {**p, "status": "stale", "data_age_s": (p["data_age_s"] or 0) + max(0.0, now - p["as_of"])}
+                p = {
+                    **p,
+                    "status": "stale",
+                    "data_age_s": (p["data_age_s"] or 0) + max(0.0, now - p["as_of"]),
+                }
             out.append(p)
         return out
 
     @staticmethod
     def _pred_out(p: dict) -> dict:
-        return {**p, "tr_id": tr_out(p["tr_id"]), "as_of": to_dt(p["as_of"]), "generated_at": to_dt(p["generated_at"]),
-                "target_time_begin": to_dt(p["target_time_begin"]), "predicted_arrival": to_dt(p["predicted_arrival"])}
+        return {
+            **p,
+            "tr_id": tr_out(p["tr_id"]),
+            "as_of": to_dt(p["as_of"]),
+            "generated_at": to_dt(p["generated_at"]),
+            "target_time_begin": to_dt(p["target_time_begin"]),
+            "predicted_arrival": to_dt(p["predicted_arrival"]),
+        }
 
     def _pred_json(self, p: dict) -> dict:
         from app.schemas.dashboard import Prediction
+
         return Prediction(**self._pred_out(p)).model_dump(mode="json")
 
     def predictions_out(self) -> list[dict]:
@@ -256,20 +316,36 @@ class Pipeline:
         for ep in self.incidents.visible(now):
             cur, alert = ep.current, ep.alert
             active = ep.closed_at is None
-            out.append({
-                "incident_id": ep.incident_id, "tr_id": tr_out(ep.tr_id), "route_id": cur["route_id"], "kind": ep.kind,
-                "status": "active" if active else "resolved",
-                "first_detected_at": to_dt(ep.opened_at), "updated_at": to_dt(cur["as_of"]), "closed_at": to_dt(ep.closed_at),
-                "severity": cur["severity"] if active else "ok", "peak_severity": ep.peak,
-                "target_stop_id": cur["target_stop_id"], "target_stop_name": cur["target_stop_name"],
-                "target_time_begin": to_dt(cur["target_time_begin"]), "horizon_s": cur["horizon_s"],
-                "prediction_delay_s": cur["prediction_delay_s"], "predicted_arrival": to_dt(cur["predicted_arrival"]),
-                "late_probability": cur["late_probability"], "segment": cur["segment"],
-                "prediction_status": "stale" if stale and active else cur["status"],
-                "suspected_reason": alert["reason"], "evidence": alert["evidence"], "recommendation": alert["recommendation"],
-                "alert_prediction_delay_s": alert["prediction_delay_s"], "alert_target_stop_name": alert["target_stop_name"],
-                "alert_target_time_begin": to_dt(alert["target_time_begin"]), "outcome_delay_s": ep.outcome_delay_s,
-            })
+            out.append(
+                {
+                    "incident_id": ep.incident_id,
+                    "tr_id": tr_out(ep.tr_id),
+                    "route_id": cur["route_id"],
+                    "kind": ep.kind,
+                    "status": "active" if active else "resolved",
+                    "first_detected_at": to_dt(ep.opened_at),
+                    "updated_at": to_dt(cur["as_of"]),
+                    "closed_at": to_dt(ep.closed_at),
+                    "severity": cur["severity"] if active else "ok",
+                    "peak_severity": ep.peak,
+                    "target_stop_id": cur["target_stop_id"],
+                    "target_stop_name": cur["target_stop_name"],
+                    "target_time_begin": to_dt(cur["target_time_begin"]),
+                    "horizon_s": cur["horizon_s"],
+                    "prediction_delay_s": cur["prediction_delay_s"],
+                    "predicted_arrival": to_dt(cur["predicted_arrival"]),
+                    "late_probability": cur["late_probability"],
+                    "segment": cur["segment"],
+                    "prediction_status": "stale" if stale and active else cur["status"],
+                    "suspected_reason": alert["reason"],
+                    "evidence": alert["evidence"],
+                    "recommendation": alert["recommendation"],
+                    "alert_prediction_delay_s": alert["prediction_delay_s"],
+                    "alert_target_stop_name": alert["target_stop_name"],
+                    "alert_target_time_begin": to_dt(alert["target_time_begin"]),
+                    "outcome_delay_s": ep.outcome_delay_s,
+                }
+            )
         return out
 
     def vehicles_out(self) -> list[dict]:
@@ -287,24 +363,40 @@ class Pipeline:
             lat = (
                 spatial.matched_lat
                 if matched and spatial.matched_lat is not None
-                else spatial.lat if matched else None
+                else spatial.lat
+                if matched
+                else None
             )
             lon = (
                 spatial.matched_lon
                 if matched and spatial.matched_lon is not None
-                else spatial.lon if matched else None
+                else spatial.lon
+                if matched
+                else None
             )
-            out.append({
-                "tr_id": tr_out(tr), "unit_id": track.unit_id, "route_id": self.network.route_id(tr),
-                "event_time": to_dt(last[0]), "lat": lat if lat is not None else last[1],
-                "lon": lon if lon is not None else last[2], "speed": last[3], "heading": last[4],
-                "location_valid": True, "data_age_s": round(age, 1),
-                "status": "live" if age <= 60 else "stale" if age <= 300 else "offline",
-                "source": "replay" if self.mode == "replay" else "ndtp",
-                "route_pattern_id": spatial.route_pattern_id if matched else None,
-                "position_quality": spatial.position_quality if matched else "raw",
-                "off_route": spatial.off_route if matched else None,
-            })
+            out.append(
+                {
+                    "tr_id": tr_out(tr),
+                    "unit_id": track.unit_id,
+                    "route_id": self.network.route_id(tr),
+                    "event_time": to_dt(last[0]),
+                    "lat": lat if lat is not None else last[1],
+                    "lon": lon if lon is not None else last[2],
+                    "speed": last[3],
+                    "heading": last[4],
+                    "location_valid": True,
+                    "data_age_s": round(age, 1),
+                    "status": "live"
+                    if age <= 60
+                    else "stale"
+                    if age <= 300
+                    else "offline",
+                    "source": "replay" if self.mode == "replay" else "ndtp",
+                    "route_pattern_id": spatial.route_pattern_id if matched else None,
+                    "position_quality": spatial.position_quality if matched else "raw",
+                    "off_route": spatial.off_route if matched else None,
+                }
+            )
         return out
 
     def schedule_out(self, tr: str) -> dict | None:
@@ -314,22 +406,42 @@ class Pipeline:
         now = self.now()
         tracker = self.features.trackers.get(tr)
         facts = {a.idx: a.t for a in tracker.arrivals if a.t <= now} if tracker else {}
-        return {"tr_id": tr_out(tr), "visits": [
-            {"visit_id": int(plan.visit_id[k]), "stop_key": int(plan.stop[k]), "time_plan": to_dt(plan.plan[k]),
-             "time_fact": to_dt(facts.get(k))}
-            for k in range(len(plan.plan))]}
+        return {
+            "tr_id": tr_out(tr),
+            "visits": [
+                {
+                    "visit_id": int(plan.visit_id[k]),
+                    "stop_key": int(plan.stop[k]),
+                    "time_plan": to_dt(plan.plan[k]),
+                    "time_fact": to_dt(facts.get(k)),
+                }
+                for k in range(len(plan.plan))
+            ],
+        }
 
     def verified_out(self, limit: int, all_: bool = False) -> list[dict]:
         """Сверенные с фактом прогнозы, новые сверху; по умолчанию — только 5-минутная сетка."""
         if not self.evaluator:
             return []
         rows = [p for p in self.evaluator.verified if all_ or p["grid5"]][-limit:][::-1]
-        return [{"sample_id": p["sample_id"], "as_of": to_dt(p["as_of"]), "tr_id": tr_out(p["tr_id"]),
-                 "route_id": p["route_id"], "target_time_begin": to_dt(p["target_time_begin"]),
-                 "target_stop_name": p["target_stop_name"], "prediction_delay_s": p["prediction_delay_s"],
-                 "outcome_delay_s": p["outcome_delay_s"], "cur_dev_s": p["cur_dev_s"],
-                 "late_probability": p["late_probability"], "status": p["status"], "severity": p["severity"],
-                 "reason_title": p["reason"]["title"] if p["reason"] else None} for p in rows]
+        return [
+            {
+                "sample_id": p["sample_id"],
+                "as_of": to_dt(p["as_of"]),
+                "tr_id": tr_out(p["tr_id"]),
+                "route_id": p["route_id"],
+                "target_time_begin": to_dt(p["target_time_begin"]),
+                "target_stop_name": p["target_stop_name"],
+                "prediction_delay_s": p["prediction_delay_s"],
+                "outcome_delay_s": p["outcome_delay_s"],
+                "cur_dev_s": p["cur_dev_s"],
+                "late_probability": p["late_probability"],
+                "status": p["status"],
+                "severity": p["severity"],
+                "reason_title": p["reason"]["title"] if p["reason"] else None,
+            }
+            for p in rows
+        ]
 
     def metrics_out(self) -> dict:
         now = self.now()
@@ -337,41 +449,69 @@ class Pipeline:
         lat = sorted(self.latencies)
         ev = self.evaluator
         lag = 0.0
-        if self.mode == "replay" and self.last_event_t is not None and not self.replay.link_down:
+        if (
+            self.mode == "replay"
+            and self.last_event_t is not None
+            and not self.replay.link_down
+        ):
             lag = max(0.0, now - self.last_event_t)
         return {
-            "now": to_dt(now), "mode": self.mode, "source": "replay" if self.mode == "replay" else "ndtp",
+            "now": to_dt(now),
+            "mode": self.mode,
+            "source": "replay" if self.mode == "replay" else "ndtp",
             "ingest_status": self.ingest_status(),
-            "model_version": ml_client.model_version or ml_client.FALLBACK_VERSION, "ml_status": ml_client.status,
+            "model_version": ml_client.model_version or ml_client.FALLBACK_VERSION,
+            "ml_status": ml_client.status,
             "vehicles_live": sum(v["status"] == "live" for v in vehicles),
-            "packets_per_min": 0 if self.ingest_status() == "down" else sum(1 for t in self.event_times if t > now - 60),
+            "packets_per_min": 0
+            if self.ingest_status() == "down"
+            else sum(1 for t in self.event_times if t > now - 60),
             "last_packet_at": to_dt(self.last_event_t),
             "inference_latency_ms_p50": round(lat[len(lat) // 2], 2) if lat else None,
-            "inference_latency_ms_p95": round(lat[int(len(lat) * 0.95)], 2) if lat else None,
+            "inference_latency_ms_p95": round(lat[int(len(lat) * 0.95)], 2)
+            if lat
+            else None,
             "queue_lag_s": round(lag, 1),
             "reconnects": self.reconnects,
             "mae_live_s": round(ev.sum_err / ev.n, 1) if ev and ev.n else None,
-            "mae_baseline_live_s": round(ev.sum_base / ev.n, 1) if ev and ev.n else None,
-            "n_verified": ev.n if ev else 0, "n_verified_grid5": ev.n5 if ev else 0,
-            "arrival_detector_mae_s": round(ev.det_err / ev.det_n, 1) if ev and ev.det_n else None,
+            "mae_baseline_live_s": round(ev.sum_base / ev.n, 1)
+            if ev and ev.n
+            else None,
+            "n_verified": ev.n if ev else 0,
+            "n_verified_grid5": ev.n5 if ev else 0,
+            "arrival_detector_mae_s": round(ev.det_err / ev.det_n, 1)
+            if ev and ev.det_n
+            else None,
             "offline_eval": None,
             "replay_speed": self.replay.speed if self.mode == "replay" else None,
         }
 
     def config_out(self) -> dict:
-        return {"thresholds": THRESHOLDS, "horizon_s": [settings.WINDOW_MIN_SEC, settings.WINDOW_MAX_SEC],
-                "predict_every_s": settings.PREDICT_EVERY_SEC,
-                "model": {"version": ml_client.model_version or ml_client.FALLBACK_VERSION, "status": ml_client.status,
-                          "ml_service_url": settings.ML_SERVICE_URL, "last_error": ml_client.last_error},
-                "replay": self._replay_info()}
+        return {
+            "thresholds": THRESHOLDS,
+            "horizon_s": [settings.WINDOW_MIN_SEC, settings.WINDOW_MAX_SEC],
+            "predict_every_s": settings.PREDICT_EVERY_SEC,
+            "model": {
+                "version": ml_client.model_version or ml_client.FALLBACK_VERSION,
+                "status": ml_client.status,
+                "ml_service_url": settings.ML_SERVICE_URL,
+                "last_error": ml_client.last_error,
+            },
+            "replay": self._replay_info(),
+        }
 
     def _replay_info(self) -> dict | None:
         r = self.replay
         if r is None or r.t is None:
             return None
         start, end = r.day_bounds
-        return {"active": r.active, "speed": r.speed, "day_start": to_dt(start), "day_end": to_dt(end),
-                "link_down": r.link_down}
+        return {
+            "active": r.active,
+            "speed": r.speed,
+            "day_start": to_dt(start),
+            "day_end": to_dt(end),
+            "link_down": r.link_down,
+        }
 
 
 pipeline = Pipeline()

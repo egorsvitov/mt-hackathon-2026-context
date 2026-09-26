@@ -41,18 +41,49 @@ class ReplayFeeder:
 
     def load(self, split: str) -> None:
         path = Path(settings.DATA_DIR) / split / "traffic.csv"
-        df = pd.read_csv(path, usecols=["tr_id", "unit_id", "event_time", "location_valid", "lon", "lat", "speed", "heading"])
+        df = pd.read_csv(
+            path,
+            usecols=[
+                "tr_id",
+                "unit_id",
+                "event_time",
+                "location_valid",
+                "lon",
+                "lat",
+                "speed",
+                "heading",
+            ],
+        )
         df["t"] = naive_to_epoch(df["event_time"])
         df = df.sort_values("t", kind="stable")
-        valid = df["location_valid"].astype(str).str.lower().eq("true") & df["lat"].notna() & df["lon"].notna()
+        valid = (
+            df["location_valid"].astype(str).str.lower().eq("true")
+            & df["lat"].notna()
+            & df["lon"].notna()
+        )
         self.t = df["t"].to_numpy(float)
         self.records = [
-            RawNDTPRecord(tr_id=str(tr), timestamp=int(round(t)), unit_id=None if pd.isna(u) else int(u),
-                          lat=float(la) if ok else None, lon=float(lo) if ok else None,
-                          speed=None if pd.isna(s) else float(s), heading=None if pd.isna(h) else float(h),
-                          location_valid=bool(ok), source="replay")
-            for tr, t, u, la, lo, s, h, ok in zip(df["tr_id"], df["t"], df["unit_id"], df["lat"], df["lon"],
-                                                   df["speed"], df["heading"], valid)
+            RawNDTPRecord(
+                tr_id=str(tr),
+                timestamp=int(round(t)),
+                unit_id=None if pd.isna(u) else int(u),
+                lat=float(la) if ok else None,
+                lon=float(lo) if ok else None,
+                speed=None if pd.isna(s) else float(s),
+                heading=None if pd.isna(h) else float(h),
+                location_valid=bool(ok),
+                source="replay",
+            )
+            for tr, t, u, la, lo, s, h, ok in zip(
+                df["tr_id"],
+                df["t"],
+                df["unit_id"],
+                df["lat"],
+                df["lon"],
+                df["speed"],
+                df["heading"],
+                valid,
+            )
         ]
         log.info("Replay: %d записей из %s", len(self.records), path)
 
@@ -114,7 +145,7 @@ class ReplayFeeder:
         end = int(np.searchsorted(self.t, until, side="right"))
         while self.idx < end:
             batch_end = min(end, self.idx + 500)
-            for rec in self.records[self.idx:batch_end]:
+            for rec in self.records[self.idx : batch_end]:
                 await self.p.ingest(rec)
             self.idx = batch_end
             await asyncio.sleep(0)  # не блокировать API при догрузке

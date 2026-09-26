@@ -4,7 +4,7 @@
 """
 
 from datetime import datetime
-from typing import Literal, Optional, Union
+from typing import Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,7 +13,9 @@ Severity = Literal["ok", "warning", "critical", "early", "unknown"]
 
 
 class Stop(BaseModel):
-    stop_key: int = Field(..., description="Физическая остановка (уникальная точка geom)")
+    stop_key: int = Field(
+        ..., description="Физическая остановка (уникальная точка geom)"
+    )
     lat: float
     lon: float
     name: str
@@ -26,19 +28,19 @@ class RouteSegment(BaseModel):
     to: int
     synthetic: bool = Field(..., description="true — нет GPS-геометрии, прямой отрезок")
     path: list[list[float]] = Field(..., description="[[lat, lon], ...]")
-    segment_id: Optional[str] = None
-    route_pattern_id: Optional[str] = None
-    source: Optional[str] = None
-    quality: Optional[str] = None
-    support: Optional[int] = None
-    length_m: Optional[float] = None
+    segment_id: str | None = None
+    route_pattern_id: str | None = None
+    source: str | None = None
+    quality: str | None = None
+    support: int | None = None
+    length_m: float | None = None
 
 
 class Route(BaseModel):
     route_id: str
     tr_id: TrId
     name: str
-    speed_norm_kmh: Optional[float] = None
+    speed_norm_kmh: float | None = None
     stops: list[int]
     segments: list[RouteSegment]
 
@@ -52,7 +54,9 @@ class Visit(BaseModel):
     visit_id: int = Field(..., description="tt_action_item_id — плановое посещение")
     stop_key: int
     time_plan: datetime
-    time_fact: Optional[datetime] = Field(None, description="Прибытие по детектору; только уже произошедшие")
+    time_fact: datetime | None = Field(
+        None, description="Прибытие по детектору; только уже произошедшие"
+    )
 
 
 class Schedule(BaseModel):
@@ -62,33 +66,33 @@ class Schedule(BaseModel):
 
 class Vehicle(BaseModel):
     tr_id: TrId
-    unit_id: Optional[int] = None
-    route_id: Optional[str] = None
+    unit_id: int | None = None
+    route_id: str | None = None
     event_time: datetime
     lat: float
     lon: float
-    speed: Optional[float] = None
-    heading: Optional[float] = None
+    speed: float | None = None
+    heading: float | None = None
     location_valid: bool = True
     data_age_s: float
     status: Literal["live", "stale", "offline"]
     source: str
-    route_pattern_id: Optional[str] = None
-    position_quality: Optional[str] = None
-    off_route: Optional[bool] = None
+    route_pattern_id: str | None = None
+    position_quality: str | None = None
+    off_route: bool | None = None
 
 
 class Reason(BaseModel):
     code: str
     title: str
-    detail: Optional[str] = None
+    detail: str | None = None
 
 
 class Evidence(BaseModel):
     code: str
     label: str
-    value: Optional[float] = None
-    norm: Optional[float] = None
+    value: float | None = None
+    norm: float | None = None
     unit: str
     flag: bool = False
 
@@ -103,7 +107,7 @@ class SegmentRef(BaseModel):
 class Prediction(BaseModel):
     sample_id: str = Field(..., description="{tr_id}_{T}, как в points.csv")
     tr_id: TrId
-    route_id: Optional[str] = None
+    route_id: str | None = None
     as_of: datetime = Field(..., description="Момент прогноза T")
     generated_at: datetime
     target_stop_id: int
@@ -112,28 +116,28 @@ class Prediction(BaseModel):
     horizon_s: float
     prediction_delay_s: float
     predicted_arrival: datetime
-    late_probability: Optional[float] = None
-    cur_dev_s: Optional[float] = None
+    late_probability: float | None = None
+    cur_dev_s: float | None = None
     cur_dev_source: str = Field("detector", description="detector | none")
     severity: Severity
     status: Literal["model", "fallback", "stale"]
     model_version: str
-    data_age_s: Optional[float] = None
+    data_age_s: float | None = None
     segment: SegmentRef
-    reason: Optional[Reason] = None
+    reason: Reason | None = None
     evidence: list[Evidence] = []
-    recommendation: Optional[str] = None
+    recommendation: str | None = None
 
 
 class Incident(BaseModel):
     incident_id: str
     tr_id: TrId
-    route_id: Optional[str] = None
+    route_id: str | None = None
     kind: Literal["late", "early"]
     status: Literal["active", "resolved"]
     first_detected_at: datetime
     updated_at: datetime
-    closed_at: Optional[datetime] = None
+    closed_at: datetime | None = None
     severity: Severity
     peak_severity: Severity
     target_stop_id: int
@@ -142,32 +146,32 @@ class Incident(BaseModel):
     horizon_s: float
     prediction_delay_s: float
     predicted_arrival: datetime
-    late_probability: Optional[float] = None
+    late_probability: float | None = None
     segment: SegmentRef
     prediction_status: str
-    suspected_reason: Optional[Reason] = None
+    suspected_reason: Reason | None = None
     evidence: list[Evidence] = []
-    recommendation: Optional[str] = None
-    alert_prediction_delay_s: Optional[float] = None
-    alert_target_stop_name: Optional[str] = None
-    alert_target_time_begin: Optional[datetime] = None
-    outcome_delay_s: Optional[float] = None
+    recommendation: str | None = None
+    alert_prediction_delay_s: float | None = None
+    alert_target_stop_name: str | None = None
+    alert_target_time_begin: datetime | None = None
+    outcome_delay_s: float | None = None
 
 
 class Verified(BaseModel):
-    sample_id: Optional[str] = None
+    sample_id: str | None = None
     as_of: datetime
     tr_id: TrId
-    route_id: Optional[str] = None
+    route_id: str | None = None
     target_time_begin: datetime
     target_stop_name: str
     prediction_delay_s: float
     outcome_delay_s: float
-    cur_dev_s: Optional[float] = None
-    late_probability: Optional[float] = None
-    status: Optional[str] = None
-    severity: Optional[Severity] = None
-    reason_title: Optional[str] = None
+    cur_dev_s: float | None = None
+    late_probability: float | None = None
+    status: str | None = None
+    severity: Severity | None = None
+    reason_title: str | None = None
 
 
 class Metrics(BaseModel):
@@ -176,21 +180,27 @@ class Metrics(BaseModel):
     source: str
     ingest_status: Literal["ok", "degraded", "down"]
     model_version: str
-    ml_status: str = Field(..., description="ok — прогнозы от ML-сервиса; fallback — ML недоступен")
+    ml_status: str = Field(
+        ..., description="ok — прогнозы от ML-сервиса; fallback — ML недоступен"
+    )
     vehicles_live: int
     packets_per_min: int
-    last_packet_at: Optional[datetime] = None
-    inference_latency_ms_p50: Optional[float] = None
-    inference_latency_ms_p95: Optional[float] = None
+    last_packet_at: datetime | None = None
+    inference_latency_ms_p50: float | None = None
+    inference_latency_ms_p95: float | None = None
     queue_lag_s: float = 0.0
     reconnects: int = 0
-    mae_live_s: Optional[float] = None
-    mae_baseline_live_s: Optional[float] = None
+    mae_live_s: float | None = None
+    mae_baseline_live_s: float | None = None
     n_verified: int = 0
     n_verified_grid5: int = 0
-    arrival_detector_mae_s: Optional[float] = Field(None, description="Ошибка детектора прибытий против факта (replay)")
-    offline_eval: Optional[dict] = None
-    replay_speed: Optional[float] = Field(None, description="Скорость часов воспроизведения (replay)")
+    arrival_detector_mae_s: float | None = Field(
+        None, description="Ошибка детектора прибытий против факта (replay)"
+    )
+    offline_eval: dict | None = None
+    replay_speed: float | None = Field(
+        None, description="Скорость часов воспроизведения (replay)"
+    )
 
 
 class Config(BaseModel):
@@ -198,4 +208,6 @@ class Config(BaseModel):
     horizon_s: list[int]
     predict_every_s: int
     model: dict
-    replay: Optional[dict] = Field(None, description="Параметры воспроизведения: день, скорость, обрыв связи")
+    replay: dict | None = Field(
+        None, description="Параметры воспроизведения: день, скорость, обрыв связи"
+    )

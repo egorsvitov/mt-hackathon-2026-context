@@ -30,7 +30,9 @@ PLAN_COLUMNS = ["tt_action_item_id", "time_begin", "tr_id", "geom", "building_ad
 def naive_to_epoch(values) -> np.ndarray:
     """Наивные метки датасета (МСК) -> Unix epoch, секунды."""
     d = pd.to_datetime(pd.Series(values))
-    naive = ((d - pd.Timestamp("1970-01-01")) / pd.Timedelta(seconds=1)).to_numpy(dtype=float)
+    naive = ((d - pd.Timestamp("1970-01-01")) / pd.Timedelta(seconds=1)).to_numpy(
+        dtype=float
+    )
     return naive - settings.TZ_OFFSET_HOURS * 3600
 
 
@@ -42,7 +44,10 @@ def to_dt(epoch: float | None) -> datetime | None:
 
 def haversine_m(lat1, lon1, lat2, lon2):
     lat1, lon1, lat2, lon2 = map(np.radians, (lat1, lon1, lat2, lon2))
-    a = np.sin((lat2 - lat1) / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2
+    a = (
+        np.sin((lat2 - lat1) / 2) ** 2
+        + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2
+    )
     return 2 * 6371000.0 * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
 
 
@@ -92,15 +97,24 @@ class NetworkStore:
             self._load_network()
             self._load_plan()
             self.loaded = True
-            log.info("Сеть: %d остановок, %d маршрутов; план: %d ТС", len(self.stops), len(self.routes), len(self.plans))
-        except Exception as e:  # сервис должен подняться и без данных — health/ready покажет причину
+            log.info(
+                "Сеть: %d остановок, %d маршрутов; план: %d ТС",
+                len(self.stops),
+                len(self.routes),
+                len(self.plans),
+            )
+        except (
+            Exception
+        ) as e:  # сервис должен подняться и без данных — health/ready покажет причину
             self.error = f"{type(e).__name__}: {e}"
             log.exception("Не удалось загрузить справочные данные")
 
     def _load_network(self) -> None:
         path = Path(settings.NETWORK_PATH)
         if not path.exists():
-            log.warning("Нет %s — маршруты будут прямыми отрезками между остановками", path)
+            log.warning(
+                "Нет %s — маршруты будут прямыми отрезками между остановками", path
+            )
             return
         net = json.loads(path.read_text(encoding="utf-8"))
         self.stops = {int(s["stop_key"]): s for s in net["stops"]}
@@ -108,7 +122,11 @@ class NetworkStore:
 
     def _load_plan(self) -> None:
         split = Path(settings.DATA_DIR) / settings.SCHEDULE_SPLIT
-        path = split / "schedule_plan.csv" if (split / "schedule_plan.csv").exists() else split / "schedule.csv"
+        path = (
+            split / "schedule_plan.csv"
+            if (split / "schedule_plan.csv").exists()
+            else split / "schedule.csv"
+        )
         df = pd.read_csv(path, usecols=PLAN_COLUMNS)  # whitelist: без time_fact_begin
         df["t_plan"] = naive_to_epoch(df["time_begin"])
 
@@ -118,7 +136,11 @@ class NetworkStore:
         net_lon = np.array([self.stops[k]["lon"] for k in net_keys])
         next_key = max(self.stops, default=-1) + 1
         keys = {}
-        for geom, addr in df[["geom", "building_address"]].drop_duplicates("geom").itertuples(index=False):
+        for geom, addr in (
+            df[["geom", "building_address"]]
+            .drop_duplicates("geom")
+            .itertuples(index=False)
+        ):
             lon, lat = map(float, geom.replace("POINT (", "").replace(")", "").split())
             k = None
             if len(net_keys):
@@ -128,8 +150,14 @@ class NetworkStore:
             if k is None:
                 k = next_key
                 next_key += 1
-                self.stops[k] = {"stop_key": k, "lat": lat, "lon": lon,
-                                 "name": addr if isinstance(addr, str) and addr.strip() else "Остановка б/н"}
+                self.stops[k] = {
+                    "stop_key": k,
+                    "lat": lat,
+                    "lon": lon,
+                    "name": addr
+                    if isinstance(addr, str) and addr.strip()
+                    else "Остановка б/н",
+                }
             keys[geom] = k
         df["stop"] = df["geom"].map(keys)
 
@@ -138,8 +166,11 @@ class NetworkStore:
             stop = g["stop"].to_numpy(int)
             tr = str(tr)
             self.plans[tr] = VehiclePlan(
-                tr_id=tr, visit_id=g["tt_action_item_id"].to_numpy(np.int64), plan=g["t_plan"].to_numpy(float),
-                stop=stop, lat=np.array([self.stops[s]["lat"] for s in stop]),
+                tr_id=tr,
+                visit_id=g["tt_action_item_id"].to_numpy(np.int64),
+                plan=g["t_plan"].to_numpy(float),
+                stop=stop,
+                lat=np.array([self.stops[s]["lat"] for s in stop]),
                 lon=np.array([self.stops[s]["lon"] for s in stop]),
             )
             if tr not in self.routes:
@@ -152,10 +183,23 @@ class NetworkStore:
                 continue
             seen.add((a, b))
             A, B = self.stops[int(a)], self.stops[int(b)]
-            segs.append({"from": int(a), "to": int(b), "synthetic": True, "path": [[A["lat"], A["lon"]], [B["lat"], B["lon"]]]})
+            segs.append(
+                {
+                    "from": int(a),
+                    "to": int(b),
+                    "synthetic": True,
+                    "path": [[A["lat"], A["lon"]], [B["lat"], B["lon"]]],
+                }
+            )
         uniq = sorted({int(s) for s in stop})
-        return {"route_id": f"R{tr}", "tr_id": tr_out(tr), "name": f"Маршрут ТС {tr}", "speed_norm_kmh": None,
-                "stops": uniq, "segments": segs}
+        return {
+            "route_id": f"R{tr}",
+            "tr_id": tr_out(tr),
+            "name": f"Маршрут ТС {tr}",
+            "speed_norm_kmh": None,
+            "stops": uniq,
+            "segments": segs,
+        }
 
     # ------------------------------------------------------------------ запросы
 
@@ -171,4 +215,7 @@ class NetworkStore:
         return r.get("speed_norm_kmh") if r else None
 
     def network_payload(self) -> dict:
-        return {"stops": list(self.stops.values()), "routes": list(self.routes.values())}
+        return {
+            "stops": list(self.stops.values()),
+            "routes": list(self.routes.values()),
+        }
