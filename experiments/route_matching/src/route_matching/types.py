@@ -1,11 +1,12 @@
 """Immutable public contracts; times are UTC epoch seconds, distances are metres."""
+
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
 import math
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 Coord = tuple[float, float]  # longitude, latitude
@@ -21,12 +22,13 @@ def timestamp(value: str | float | datetime, timezone_name: str = "UTC") -> floa
 
 
 def iso(value: float | None) -> str | None:
-    return datetime.fromtimestamp(value, timezone.utc).isoformat() if value is not None else None
+    return datetime.fromtimestamp(value, UTC).isoformat() if value is not None else None
 
 
 def digest(value: object) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                     allow_nan=False).encode()).hexdigest()[:24]
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()[:24]
 
 
 @dataclass(frozen=True)
@@ -43,9 +45,15 @@ class Event:
 
     @property
     def valid(self) -> bool:
-        return (self.location_valid and self.lon is not None and self.lat is not None
-                and math.isfinite(self.lon) and math.isfinite(self.lat)
-                and 30 < self.lon < 45 and 50 < self.lat < 60)
+        return (
+            self.location_valid
+            and self.lon is not None
+            and self.lat is not None
+            and math.isfinite(self.lon)
+            and math.isfinite(self.lat)
+            and 30 < self.lon < 45
+            and 50 < self.lat < 60
+        )
 
     @property
     def coord(self) -> Coord:
@@ -60,8 +68,11 @@ class Event:
     @property
     def available_time(self) -> float:
         """When the observation was knowable by a causal consumer."""
-        return (max(self.event_time, self.receive_time)
-                if self.receive_time is not None else self.event_time)
+        return (
+            max(self.event_time, self.receive_time)
+            if self.receive_time is not None
+            else self.event_time
+        )
 
 
 @dataclass(frozen=True)
@@ -76,7 +87,8 @@ class Visit:
 
 @dataclass(frozen=True)
 class StopGroup:
-    """Co-located consecutive visits; equal-time DIFFERENT locations stay alternatives."""
+    """A physical stop and all schedule visit aliases represented by it."""
+
     stop_id: str
     coord: Coord
     visits: tuple[Visit, ...]
@@ -137,11 +149,12 @@ class Passage:
     available_at: float
     path: RoadPath
     quality: float
+    trip_occurrence_id: str | None = None
 
     @property
     def key(self) -> tuple:
         # Never count aliases, duplicate packets or alternate schedule hypotheses twice.
-        return self.tr_id, self.start_time, self.end_time
+        return self.trip_occurrence_id, self.tr_id, self.start_time, self.end_time
 
 
 @dataclass(frozen=True)
@@ -151,7 +164,9 @@ class Variant:
     source: str
     support: int
     support_fraction: float
-    provenance: tuple[tuple[int, float, float], ...] = ()
+    # New catalogs store (trip_occurrence_id, tr_id, start_time, end_time).
+    # The loader deliberately accepts older three-item tuples as well.
+    provenance: tuple[tuple, ...] = ()
     available_at: float | None = None
     median_duration_s: float | None = None
 
@@ -175,6 +190,36 @@ class Sequence:
     stops: tuple[StopGroup, ...]
     legs: tuple[Leg, ...]
     ambiguous: bool = False
+    route_pattern_id: str | None = None
+    direction_id: str | None = None
+    trip_occurrence_id: str | None = None
+
+    @property
+    def start_time(self) -> float:
+        return self.stops[0].time
+
+    @property
+    def end_time(self) -> float:
+        return self.stops[-1].time
+
+
+@dataclass(frozen=True)
+class RoutePattern:
+    route_pattern_id: str
+    direction_id: str
+    stop_ids: tuple[str, ...]
+    canonical_trip_id: str
+    trip_occurrence_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class VisitAssignment:
+    visit_id: str
+    tr_id: int
+    trip_occurrence_id: str
+    route_pattern_id: str
+    direction_id: str
+    stop_index: int
 
 
 @dataclass(frozen=True)
@@ -196,6 +241,15 @@ class Config:
     fallback_timeout_s: float = 1.0
     stop_radius_m: float = 60.0
     cluster_distance: float = 0.2
+    physical_stop_radius_m: float = 3.0
+    trip_gap_s: float = 1200.0
+    terminal_radius_m: float = 150.0
+    terminal_pause_s: float = 180.0
+    occurrence_margin_s: float = 1800.0
+    pattern_edit_distance: float = 0.15
+
+
+DEFAULT_CONFIG = Config()
 
 
 @dataclass(frozen=True)
@@ -210,19 +264,35 @@ class MatchState:
     edge_offset_m: float | None = None
     lon: float | None = None
     lat: float | None = None
+    matched_lon: float | None = None
+    matched_lat: float | None = None
     sequence_id: str | None = None
+    route_pattern_id: str | None = None
+    direction_id: str | None = None
+    trip_occurrence_id: str | None = None
     visit_id: str | None = None
     visit_index: int | None = None
     segment_id: str | None = None
+    current_segment_id: str | None = None
+    target_segment_id: str | None = None
     variant_id: str | None = None
     progress: float | None = None
+    segment_progress: float | None = None
+    route_progress: float | None = None
     remaining_distance_m: float | None = None
     remaining_visits: int | None = None
+    remaining_segments: int | None = None
+    remaining_stops: int | None = None
     speed_mps: float | None = None
     speed_1m_mps: float | None = None
     speed_3m_mps: float | None = None
     speed_5m_mps: float | None = None
     route_distance_m: float | None = None
+    planned_segment_time_s: float | None = None
+    planned_remaining_time_s: float | None = None
+    historical_segment_time_s: float | None = None
+    estimated_remaining_time_s: float | None = None
+    segment_support: int | None = None
     position_quality: str = "unknown"
     route_quality: str = "unknown"
     route_source: str | None = None
@@ -233,15 +303,49 @@ class MatchState:
     reason: str | None = None
 
     def features(self) -> dict[str, float | None]:
-        names = ("progress", "remaining_distance_m", "remaining_visits", "speed_mps",
-                 "speed_1m_mps", "speed_3m_mps", "speed_5m_mps", "route_distance_m",
-                 "confidence_margin", "gps_age_s")
+        names = (
+            "segment_progress",
+            "route_progress",
+            "remaining_distance_m",
+            "remaining_segments",
+            "remaining_stops",
+            "speed_mps",
+            "speed_1m_mps",
+            "speed_3m_mps",
+            "speed_5m_mps",
+            "route_distance_m",
+            "confidence_margin",
+            "gps_age_s",
+            "planned_segment_time_s",
+            "planned_remaining_time_s",
+            "historical_segment_time_s",
+            "estimated_remaining_time_s",
+            "segment_support",
+        )
         result = {f"mm_{k}": getattr(self, k) for k in names}
-        result.update(mm_matched=float(self.mode != "unmatched"),
-                      mm_confirmed=float(self.route_quality == "confirmed"),
-                      mm_fallback=float(self.mode == "road"),
-                      mm_off_route=None if self.off_route is None else float(self.off_route))
+        result.update(
+            mm_matched=float(self.mode != "unmatched"),
+            mm_confirmed=float(self.route_quality == "confirmed"),
+            mm_fallback=float(self.mode == "road"),
+            mm_off_route=None if self.off_route is None else float(self.off_route),
+        )
         return {**result, **{k + "_missing": float(v is None) for k, v in result.items()}}
+
+    def categorical_features(self) -> dict[str, str]:
+        values = {
+            "mm_route_pattern_id": self.route_pattern_id,
+            "mm_direction_id": self.direction_id,
+            "mm_current_segment_id": self.current_segment_id,
+            "mm_target_segment_id": self.target_segment_id,
+            "mm_mode": self.mode,
+            "mm_position_quality": self.position_quality,
+            "mm_route_quality": self.route_quality,
+            "mm_route_source": self.route_source,
+        }
+        return {key: value or "__unknown__" for key, value in values.items()}
+
+    def feature_row(self) -> dict[str, float | str | None]:
+        return {**self.features(), **self.categorical_features()}
 
     def to_dict(self) -> dict:
         return asdict(self)

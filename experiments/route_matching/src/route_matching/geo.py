@@ -3,10 +3,12 @@
 The released stops lie inside Moscow. An equirectangular projection around 55.75°N
 has sub-metre error at route-segment scale and avoids a native GIS runtime.
 """
+
 from __future__ import annotations
 
 import math
 from dataclasses import replace
+from itertools import pairwise
 
 from .types import Coord, Edge, RoadPath
 
@@ -34,7 +36,7 @@ def line(shape: tuple[Coord, ...]) -> tuple[Coord, ...]:
 
 
 def polyline_length(shape: tuple[Coord, ...]) -> float:
-    return sum(distance(a, b) for a, b in zip(shape, shape[1:]))
+    return sum(distance(a, b) for a, b in pairwise(shape))
 
 
 def angle_difference(a: float, b: float) -> float:
@@ -48,17 +50,23 @@ def project(shape: tuple[Coord, ...], coord: Coord) -> tuple[float, float, Coord
     px, py = xy(coord)
     best = None
     cursor = 0.0
-    for a, b in zip(shape, shape[1:]):
+    for a, b in pairwise(shape):
         ax, ay = xy(a)
         bx, by = xy(b)
         dx, dy = bx - ax, by - ay
         length2 = dx * dx + dy * dy
-        fraction = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length2)) if length2 else 0.0
+        fraction = (
+            max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length2)) if length2 else 0.0
+        )
         sx, sy = ax + fraction * dx, ay + fraction * dy
         d = math.hypot(px - sx, py - sy)
         length = math.sqrt(length2)
-        candidate = (d, cursor + fraction * length, lonlat((sx, sy)),
-                     math.degrees(math.atan2(dx, dy)) % 360)
+        candidate = (
+            d,
+            cursor + fraction * length,
+            lonlat((sx, sy)),
+            math.degrees(math.atan2(dx, dy)) % 360,
+        )
         if best is None or candidate[0] < best[0]:
             best = candidate
         cursor += length
@@ -78,7 +86,7 @@ def joinable(a: Edge, b: Edge, tolerance_m: float = 3.0) -> bool:
 
 def _point_at(shape: tuple[Coord, ...], wanted: float) -> Coord:
     cursor = 0.0
-    for a, b in zip(shape, shape[1:]):
+    for a, b in pairwise(shape):
         length = distance(a, b)
         if cursor + length >= wanted or b == shape[-1]:
             f = max(0.0, min(1.0, (wanted - cursor) / length)) if length else 0.0
@@ -94,7 +102,7 @@ def _slice(shape: tuple[Coord, ...], start: float, end: float) -> tuple[Coord, .
     start, end = max(0.0, start), min(total, end)
     output = [_point_at(shape, start)]
     cursor = 0.0
-    for a, b in zip(shape, shape[1:]):
+    for a, b in pairwise(shape):
         cursor += distance(a, b)
         if start < cursor < end:
             output.append(b)
@@ -111,9 +119,15 @@ def clip_path(path: RoadPath, start: float, end: float) -> RoadPath:
         if hi <= lo or edge.length_m <= 0:
             continue
         span = edge.target_fraction - edge.source_fraction
-        result.append(replace(edge, shape=_slice(edge.shape, lo, hi), length_m=hi - lo,
-                              source_fraction=edge.source_fraction + span * lo / edge.length_m,
-                              target_fraction=edge.source_fraction + span * hi / edge.length_m))
+        result.append(
+            replace(
+                edge,
+                shape=_slice(edge.shape, lo, hi),
+                length_m=hi - lo,
+                source_fraction=edge.source_fraction + span * lo / edge.length_m,
+                target_fraction=edge.source_fraction + span * hi / edge.length_m,
+            )
+        )
     return RoadPath(tuple(result))
 
 
@@ -145,7 +159,6 @@ def edit_distance(a: tuple, b: tuple) -> float:
     for i, left in enumerate(a, 1):
         current = [i]
         for j, right in enumerate(b, 1):
-            current.append(min(current[-1] + 1, previous[j] + 1,
-                               previous[j - 1] + (left != right)))
+            current.append(min(current[-1] + 1, previous[j] + 1, previous[j - 1] + (left != right)))
         previous = current
     return previous[-1] / max(len(a), len(b), 1)

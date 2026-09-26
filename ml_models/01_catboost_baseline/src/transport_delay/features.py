@@ -344,6 +344,12 @@ def feature_columns(
         ]
     if "peers" in groups:
         columns += [c for c in frame if c.startswith("peers_")]
+    if "spatial" in groups:
+        columns += [
+            c
+            for c in frame
+            if c.startswith("mm_") and c not in {"mm_catalog_version", "mm_route_eta_prediction_s"}
+        ]
     if include_vehicle:
         columns.append("tr_id")
     return list(dict.fromkeys(c for c in columns if c in frame.columns))

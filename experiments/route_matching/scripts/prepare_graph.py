@@ -3,12 +3,13 @@
 
 No daemon settings, groups, permissions or sudo configuration are modified.
 """
+
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--pbf", type=Path, required=True)
@@ -19,16 +20,34 @@ parser.add_argument("--output-env", type=Path, default=Path(".env"))
 args = parser.parse_args()
 if not args.pbf.is_file():
     parser.error("PBF does not exist")
+if shutil.which("docker") is None:
+    parser.error(
+        "Docker CLI is not installed or is absent from PATH; install Docker Engine "
+        "and the Docker Compose plugin first"
+    )
 subprocess.run(["docker", "pull", args.image], check=True)
-image = subprocess.check_output(["docker", "image", "inspect", args.image,
-                                 "--format", "{{index .RepoDigests 0}}"], text=True).strip()
+image = subprocess.check_output(
+    ["docker", "image", "inspect", args.image, "--format", "{{index .RepoDigests 0}}"], text=True
+).strip()
 with args.pbf.open("rb") as stream:
     checksum = hashlib.file_digest(stream, "sha256").hexdigest()
-settings = {"costing": "bus", "server_threads": 4, "build_admins": True,
-            "build_time_zones": True, "build_transit": False, "build_elevation": False}
-manifest = {"pbf_sha256": checksum, "source_url": args.source_url,
-            "image": image, "settings": settings}
-manifest["graph_version"] = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()[:24]
+settings = {
+    "costing": "bus",
+    "server_threads": 4,
+    "build_admins": True,
+    "build_time_zones": True,
+    "build_transit": False,
+    "build_elevation": False,
+}
+manifest = {
+    "pbf_sha256": checksum,
+    "source_url": args.source_url,
+    "image": image,
+    "settings": settings,
+}
+manifest["graph_version"] = hashlib.sha256(
+    json.dumps(manifest, sort_keys=True).encode()
+).hexdigest()[:24]
 directory = args.osm_dir.expanduser().resolve()
 directory.mkdir(parents=True, exist_ok=True)
 existing = directory / "graph_manifest.json"

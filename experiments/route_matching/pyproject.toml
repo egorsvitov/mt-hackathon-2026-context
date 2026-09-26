@@ -1,6 +1,6 @@
 [project]
 name = "route-matching"
-version = "0.1.0"
+version = "0.2.0"
 description = "Causal stop-to-stop route discovery and streaming map matching"
 requires-python = ">=3.12"
 dependencies = []

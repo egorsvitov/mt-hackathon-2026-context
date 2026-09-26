@@ -5,4 +5,14 @@ from .matcher import Matcher
 from .replay import replay
 from .types import Config, Event, MatchState
 
-__all__ = ["Catalog", "Config", "Event", "MatchState", "Matcher", "build_catalog", "replay"]
+__all__ = [
+    "Catalog",
+    "Config",
+    "Event",
+    "MatchState",
+    "Matcher",
+    "StreamingSpatialAdapter",
+    "build_catalog",
+    "replay",
+]
+from .adapters import StreamingSpatialAdapter

@@ -31,6 +31,7 @@ class ModelBundle:
     feature_names: list[str]
     spec: ModelSpec
     metadata: dict[str, Any]
+    categorical_feature_names: list[str] | None = None
 
     def save(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
@@ -48,6 +49,7 @@ class ModelBundle:
                 "seeds": list(self.spec.seeds),
             },
             "metadata": self.metadata,
+            "categorical_feature_names": self.categorical_feature_names or [],
         }
         (directory / "manifest.json").write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8"
@@ -64,7 +66,29 @@ class ModelBundle:
             model = CatBoostRegressor()
             model.load_model(directory / name)
             models.append(model)
-        return cls(models, manifest["feature_names"], ModelSpec(**raw_spec), manifest["metadata"])
+        return cls(
+            models,
+            manifest["feature_names"],
+            ModelSpec(**raw_spec),
+            manifest["metadata"],
+            manifest.get("categorical_feature_names", []),
+        )
+
+
+def _categorical_features(frame: pd.DataFrame, features: list[str]) -> list[str]:
+    return [
+        name
+        for name in features
+        if name in frame
+        and (frame[name].dtype == "object" or str(frame[name].dtype).startswith("string"))
+    ]
+
+
+def _model_frame(frame: pd.DataFrame, features: list[str], categorical: list[str]) -> pd.DataFrame:
+    values = frame[features].copy()
+    for name in categorical:
+        values[name] = values[name].fillna("__unknown__").astype(str)
+    return values
 
 
 def _fit_one(
@@ -91,14 +115,19 @@ def _fit_one(
         verbose=False,
     )
     kwargs: dict[str, Any] = {}
+    categorical = _categorical_features(train, features)
     if valid is not None and len(valid):
         valid_target = valid["target_delay_s"].to_numpy(dtype=float, copy=True)
         if spec.formulation == "residual":
             valid_target -= valid["cur_dev_s"].to_numpy(float)
         kwargs.update(
-            eval_set=(valid[features], valid_target), early_stopping_rounds=100, use_best_model=True
+            eval_set=(_model_frame(valid, features, categorical), valid_target),
+            early_stopping_rounds=100,
+            use_best_model=True,
         )
-    model.fit(train[features], target, **kwargs)
+    model.fit(
+        _model_frame(train, features, categorical), target, cat_features=categorical, **kwargs
+    )
     return model
 
 
@@ -106,13 +135,27 @@ def train_bundle(
     frame: pd.DataFrame, spec: ModelSpec, metadata: dict[str, Any] | None = None
 ) -> ModelBundle:
     features = feature_columns(frame, spec.groups, spec.include_vehicle)
+    metadata = dict(metadata or {})
+    if "mm_catalog_version" in frame:
+        metadata["route_catalog_versions"] = sorted(
+            str(value) for value in frame["mm_catalog_version"].dropna().unique()
+        )
     models = [_fit_one(frame, None, features, spec, seed) for seed in spec.seeds]
-    return ModelBundle(models, features, spec, metadata or {})
+    return ModelBundle(models, features, spec, metadata, _categorical_features(frame, features))
 
 
 def predict(features: pd.DataFrame, model_bundle: ModelBundle) -> np.ndarray:
     values = np.mean(
-        [model.predict(features[model_bundle.feature_names]) for model in model_bundle.models],
+        [
+            model.predict(
+                _model_frame(
+                    features,
+                    model_bundle.feature_names,
+                    model_bundle.categorical_feature_names or [],
+                )
+            )
+            for model in model_bundle.models
+        ],
         axis=0,
     )
     if model_bundle.spec.formulation == "residual":
