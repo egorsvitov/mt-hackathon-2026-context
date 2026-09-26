@@ -8,7 +8,7 @@ services:
     build:
       context: .
       dockerfile: ml_service/Dockerfile
-    ports: ["${ML_PORT:-8001}:8001"]
+    # ports: ["${ML_PORT:-8001}:8001"] # Убрано, вызывается только внутри сети
     environment:
       MODEL_VERSION: ${MODEL_VERSION:-01_baseline}
     healthcheck:
@@ -20,7 +20,7 @@ services:
 
   ndtp-parser:
     build: ./ndtp-parser
-    ports: ["${NDTP_PORT:-9201}:9201"]
+    ports: ["${NDTP_PORT:-19201}:9201"]
     environment:
       BACKEND_URL: http://backend:8000/api/v1/stream/telemetry
     depends_on:
@@ -31,7 +31,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    ports: ["${BACKEND_PORT:-8000}:8000"]
+    ports: ["${BACKEND_PORT:-18000}:8000"]
     environment:
       DATA_DIR: /data
       NETWORK_PATH: /refdata/network.json
@@ -50,7 +50,7 @@ services:
 
   dashboard:
     build: ./dashboard
-    ports: ["${DASHBOARD_PORT:-8080}:80"]
+    ports: ["${DASHBOARD_PORT:-18080}:80"]
     environment:
       DASHBOARD_API: /api/v1
       BACKEND_URL: http://backend:8000

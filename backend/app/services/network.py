@@ -121,12 +121,26 @@ class NetworkStore:
         self.routes = {str(r["tr_id"]): r for r in net["routes"]}
 
     def _load_plan(self) -> None:
-        split = Path(settings.DATA_DIR) / settings.SCHEDULE_SPLIT
-        path = (
-            split / "schedule_plan.csv"
-            if (split / "schedule_plan.csv").exists()
-            else split / "schedule.csv"
-        )
+        base_dir = Path(settings.DATA_DIR)
+        split = base_dir / settings.SCHEDULE_SPLIT
+        
+        candidates = [
+            split / "schedule_plan.csv",
+            split / "schedule.csv",
+            base_dir / "schedule_plan.csv",
+            base_dir / "schedule.csv",
+        ]
+        
+        path = None
+        for cand in candidates:
+            if cand.exists():
+                path = cand
+                break
+                
+        if not path:
+            log.warning("Файл расписания (schedule.csv) не найден в %s. План не загружен.", base_dir)
+            return
+            
         df = pd.read_csv(path, usecols=PLAN_COLUMNS)  # whitelist: без time_fact_begin
         df["t_plan"] = naive_to_epoch(df["time_begin"])
 

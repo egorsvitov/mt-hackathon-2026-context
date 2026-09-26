@@ -1,4 +1,4 @@
-tools
+tools/.cache
 contract
 data/points_grid.csv
 *.md
