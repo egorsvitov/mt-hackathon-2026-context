@@ -16,75 +16,131 @@
   <header class="topbar">
     <div class="brand">
       <div class="logo">◆</div>
-      <div><b>Предиктор задержек</b><small>Диспетчерская · прогноз за 10–15 мин</small></div>
+      <div><b>Предиктор задержек</b><small>прогноз за 10–15 мин</small></div>
     </div>
-    <div class="mode" id="mode-badge"><span class="dot"></span>…</div>
+    <nav class="views-nav" id="views-nav" aria-label="Экраны">
+      <a href="#dispatch" data-view="dispatch">Диспетчерская</a>
+      <a href="#analytics" data-view="analytics">Аналитика</a>
+      <a href="#journal" data-view="journal">Журнал</a>
+    </nav>
     <div class="clock"><span id="clock-time" class="num">--:--:--</span><small id="clock-date"></small></div>
-    <div class="playback" id="playback">
-      <button class="iconbtn" id="btn-play" title="Пауза / пуск (пробел)" aria-label="Пауза">❚❚</button>
-      <div class="seg" id="speed" role="group" aria-label="Скорость воспроизведения">
-        <button data-speed="1">×1</button>
-        <button data-speed="10">×10</button>
-        <button data-speed="60">×60</button>
-        <button data-speed="300">×300</button>
-      </div>
-      <input type="range" id="scrub" aria-label="Время воспроизведения">
-    </div>
     <div class="top-actions">
-      <button class="ghost" id="btn-link" title="Имитация обрыва связи с источником телеметрии: сервис переходит на последнее известное состояние">Обрыв связи</button>
+      <span class="status-pill" id="status-pill" title="Свежесть данных"><span class="dot"></span><span id="status-text">…</span></span>
+      <div class="demo-wrap">
+        <button class="ghost" id="btn-demo" aria-expanded="false" title="Управление воспроизведением и имитация сбоев">Демо ▾</button>
+        <div class="demo-pop" id="demo-pop" hidden>
+          <div class="demo-row demo-mode" id="mode-badge">…</div>
+          <div class="demo-row playback" id="playback">
+            <button class="iconbtn" id="btn-play" title="Пауза / пуск (пробел)" aria-label="Пауза">❚❚</button>
+            <div class="seg" id="speed" role="group" aria-label="Скорость воспроизведения">
+              <button data-speed="1">×1</button>
+              <button data-speed="10">×10</button>
+              <button data-speed="60">×60</button>
+              <button data-speed="300">×300</button>
+            </div>
+          </div>
+          <div class="demo-row" id="scrub-row">
+            <input type="range" id="scrub" aria-label="Время воспроизведения">
+          </div>
+          <div class="demo-row">
+            <button class="ghost wide" id="btn-link" title="Имитация обрыва связи с источником телеметрии">Обрыв связи</button>
+          </div>
+          <div class="demo-hint">Пробел — пауза, ← / → — ±5 мин</div>
+        </div>
+      </div>
       <button class="ghost" id="btn-theme" title="Светлая / тёмная тема">Тема</button>
     </div>
   </header>
 
   <div class="banner" id="banner" hidden></div>
 
-  <section class="kpis" id="kpis" aria-label="Сводка"></section>
+  <!-- ============================== Диспетчерская ============================== -->
+  <section class="view view-dispatch" id="view-dispatch">
+    <div class="statusbar" id="statusbar" aria-label="Сводка по маршрутам"></div>
 
-  <main class="main">
-    <div class="map-wrap">
-      <div id="map" aria-label="Карта маршрутной сети"></div>
-      <div class="map-overlay legend" id="legend"></div>
-      <div class="map-overlay map-hint" id="map-hint" hidden></div>
-      <div class="map-overlay maptools">
-        <label><input type="checkbox" id="opt-other" checked> ТС без расписания</label>
-        <label><input type="checkbox" id="opt-stops"> Все остановки</label>
-      </div>
-    </div>
-    <aside class="side">
-      <nav class="tabs" id="tabs">
-        <button data-tab="incidents" class="on">Инциденты<span class="cnt" id="n-inc">0</span></button>
-        <button data-tab="routes">Маршруты<span class="cnt" id="n-routes">0</span></button>
-        <button data-tab="verified">Проверка<span class="cnt" id="n-ver">0</span></button>
-      </nav>
-      <div class="tab-body" id="tab-incidents"></div>
-      <div class="tab-body" id="tab-routes" hidden></div>
-      <div class="tab-body" id="tab-verified" hidden></div>
-    </aside>
-  </main>
-
-  <section class="drawer" id="drawer" hidden>
-    <div class="drawer-head" id="drawer-head"></div>
-    <div class="drawer-body">
-      <div>
-        <div class="pane-title"><span>Линейка рейса</span><span class="lg">план · прогноз</span></div>
-        <div class="strip" id="strip"></div>
-      </div>
-      <div>
-        <div class="pane-title">
-          <span>Отклонение от графика, мин</span>
-          <span class="lg"><span><i style="--c:var(--s1)"></i>факт</span><span><i style="--c:var(--s2)"></i>прогноз</span></span>
+    <main class="main">
+      <div class="map-wrap">
+        <div id="map" aria-label="Карта маршрутной сети"></div>
+        <div class="map-overlay legend" id="legend"></div>
+        <div class="map-overlay map-hint" id="map-hint" hidden></div>
+        <div class="map-overlay maptools">
+          <label><input type="checkbox" id="opt-other" checked> ТС без расписания</label>
+          <label><input type="checkbox" id="opt-stops"> Все остановки</label>
         </div>
-        <div class="chart" id="chart-dev"></div>
       </div>
-      <div>
-        <div class="pane-title"><span>Скорость, км/ч</span><span class="lg"><span><i style="--c:var(--s1)"></i>скорость, ср. за 1 мин</span><span><i style="--c:var(--muted)"></i>норма</span></span></div>
-        <div class="chart" id="chart-speed"></div>
+      <aside class="side">
+        <nav class="tabs" id="tabs">
+          <button data-tab="attention" class="on">Требуют внимания<span class="cnt" id="n-att">0</span></button>
+          <button data-tab="routes">Маршруты<span class="cnt" id="n-routes">0</span></button>
+        </nav>
+        <div class="tab-body" id="tab-attention"></div>
+        <div class="tab-body" id="tab-routes" hidden></div>
+      </aside>
+    </main>
+
+    <section class="drawer" id="drawer" hidden>
+      <div class="drawer-head" id="drawer-head"></div>
+      <div class="drawer-body">
+        <div>
+          <div class="pane-title"><span>Ближайшие остановки</span><span class="lg">план → ожидается</span></div>
+          <div class="strip" id="strip"></div>
+        </div>
+        <div>
+          <div class="pane-title">
+            <span>Отставание от графика, мин</span>
+            <span class="lg"><span><i style="--c:var(--s1)"></i>было</span><span><i style="--c:var(--s2)"></i>прогноз</span></span>
+          </div>
+          <div class="chart" id="chart-dev"></div>
+        </div>
+        <div class="pane-ev">
+          <div class="pane-title"><span>Почему так считаем</span></div>
+          <div class="ev" id="evidence"></div>
+        </div>
       </div>
-      <div class="pane-ev">
-        <div class="pane-title"><span>Признаки на момент прогноза</span></div>
-        <div class="ev" id="evidence"></div>
-      </div>
+    </section>
+  </section>
+
+  <!-- ============================== Аналитика ============================== -->
+  <section class="view view-page" id="view-analytics" hidden>
+    <div class="page-head">
+      <div><h1>Аналитика</h1><p id="an-sub">Качество прогноза и работа системы</p></div>
     </div>
+    <div class="an-kpis" id="an-kpis"></div>
+    <h2 class="an-section">Качество прогноза</h2>
+    <div class="an-grid">
+      <figure class="an-card wide"><figcaption>Точность по времени суток <small>средняя ошибка прогноза, мин · окно 30 мин</small></figcaption><div class="an-chart" id="an-mae-time"></div></figure>
+      <figure class="an-card"><figcaption>Прогноз против факта <small>каждая точка — проверенный прогноз, мин</small></figcaption><div class="an-chart" id="an-scatter"></div></figure>
+      <figure class="an-card"><figcaption>Распределение ошибки <small>прогноз − факт, мин</small></figcaption><div class="an-chart" id="an-hist"></div></figure>
+      <figure class="an-card"><figcaption>Классы: прогноз и факт <small>доля внутри каждого фактического класса; пороги −1 и +2 мин</small></figcaption><div class="an-chart" id="an-confusion"></div></figure>
+      <figure class="an-card"><figcaption>Точность по маршрутам <small>средняя ошибка, мин</small></figcaption><div class="an-chart" id="an-routes"></div></figure>
+    </div>
+    <h2 class="an-section">Обстановка и система</h2>
+    <div class="an-grid">
+      <figure class="an-card wide"><figcaption>Картина дня <small>маршруты по уровню риска, каждые 5 мин</small></figcaption><div class="an-chart" id="an-day"></div></figure>
+      <figure class="an-card"><figcaption>Поток телеметрии <small>отметок в минуту</small></figcaption><div class="an-chart" id="an-flow"></div></figure>
+      <figure class="an-card"><figcaption>Задержка обработки <small>признаки + модель на один прогноз, мс</small></figcaption><div class="an-chart" id="an-latency"></div></figure>
+    </div>
+  </section>
+
+  <!-- ============================== Журнал ============================== -->
+  <section class="view view-page" id="view-journal" hidden>
+    <div class="page-head">
+      <div><h1>Журнал</h1><p>Все прогнозы, инциденты и события системы</p></div>
+    </div>
+    <nav class="tabs jr-tabs" id="jr-tabs">
+      <button data-jtab="predictions" class="on">Прогнозы<span class="cnt" id="jr-n-pred">0</span></button>
+      <button data-jtab="incidents">Инциденты<span class="cnt" id="jr-n-inc">0</span></button>
+      <button data-jtab="events">События системы<span class="cnt" id="jr-n-ev">0</span></button>
+    </nav>
+    <div class="jr-filters" id="jr-filters">
+      <label>ТС <select id="jr-tr"><option value="">все</option></select></label>
+      <label class="jr-f-pred"><input type="checkbox" id="jr-f-fact"> только с фактом</label>
+      <label class="jr-f-pred"><input type="checkbox" id="jr-f-err"> ошибка больше 2 мин</label>
+      <label class="jr-f-pred"><input type="checkbox" id="jr-f-alert"> только тревоги</label>
+      <span class="jr-count" id="jr-count"></span>
+      <button class="ghost" id="jr-csv">Скачать CSV</button>
+    </div>
+    <div class="jr-table" id="jr-table"></div>
   </section>
 
   <script src="config.js" onerror="void 0"></script>
@@ -92,10 +148,12 @@
   <script src="vendor/protomaps/pmtiles.js"></script>
   <script src="vendor/protomaps/basemaps.js"></script>
   <script src="vendor/echarts.min.js"></script>
-  <script src="js/util.js?v=20260926-3"></script>
-  <script src="js/source-replay.js?v=20260926-3"></script>
-  <script src="js/source-api.js?v=20260926-3"></script>
-  <script src="js/map.js?v=20260926-3"></script>
-  <script src="js/app.js?v=20260926-3"></script>
+  <script src="js/util.js?v=20260927-1"></script>
+  <script src="js/source-replay.js?v=20260927-1"></script>
+  <script src="js/source-api.js?v=20260927-1"></script>
+  <script src="js/map.js?v=20260927-1"></script>
+  <script src="js/analytics.js?v=20260927-1"></script>
+  <script src="js/journal.js?v=20260927-1"></script>
+  <script src="js/app.js?v=20260927-1"></script>
 </body>
 </html>

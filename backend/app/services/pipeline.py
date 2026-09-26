@@ -43,7 +43,7 @@ class Evaluator:
         self.facts = facts
         self.pending: list = []
         self.seq = itertools.count()
-        self.verified: deque = deque(maxlen=400)
+        self.verified: deque = deque(maxlen=20000)  # все сверенные прогнозы (для аналитики и журнала)
         self.sum_err = self.sum_base = 0.0
         self.n = self.n5 = 0
         self.det_err = 0.0
@@ -62,9 +62,9 @@ class Evaluator:
             self.sum_err += abs(p["prediction_delay_s"] - outcome)
             self.sum_base += abs((p["cur_dev_s"] or 0.0) - outcome)
             incidents.set_outcome(p["tr_id"], p["target_stop_id"], outcome)
-            if int(p["as_of"]) % 300 == 0:  # журнал — на 5-минутной сетке, как у организаторов
-                self.n5 += 1
-                self.verified.append({**p, "outcome_delay_s": outcome})
+            grid5 = int(p["as_of"]) % 300 == 0  # 5-минутная сетка, как у организаторов
+            self.n5 += grid5
+            self.verified.append({**p, "outcome_delay_s": outcome, "grid5": grid5})
 
     def on_arrival(self, visit_id: int, a: Arrival) -> None:
         fact = self.facts.get(visit_id)
@@ -319,13 +319,17 @@ class Pipeline:
              "time_fact": to_dt(facts.get(k))}
             for k in range(len(plan.plan))]}
 
-    def verified_out(self, limit: int) -> list[dict]:
+    def verified_out(self, limit: int, all_: bool = False) -> list[dict]:
+        """Сверенные с фактом прогнозы, новые сверху; по умолчанию — только 5-минутная сетка."""
         if not self.evaluator:
             return []
-        rows = list(self.evaluator.verified)[-limit:][::-1]
-        return [{"as_of": to_dt(p["as_of"]), "tr_id": tr_out(p["tr_id"]), "target_time_begin": to_dt(p["target_time_begin"]),
+        rows = [p for p in self.evaluator.verified if all_ or p["grid5"]][-limit:][::-1]
+        return [{"sample_id": p["sample_id"], "as_of": to_dt(p["as_of"]), "tr_id": tr_out(p["tr_id"]),
+                 "route_id": p["route_id"], "target_time_begin": to_dt(p["target_time_begin"]),
                  "target_stop_name": p["target_stop_name"], "prediction_delay_s": p["prediction_delay_s"],
-                 "outcome_delay_s": p["outcome_delay_s"], "cur_dev_s": p["cur_dev_s"]} for p in rows]
+                 "outcome_delay_s": p["outcome_delay_s"], "cur_dev_s": p["cur_dev_s"],
+                 "late_probability": p["late_probability"], "status": p["status"], "severity": p["severity"],
+                 "reason_title": p["reason"]["title"] if p["reason"] else None} for p in rows]
 
     def metrics_out(self) -> dict:
         now = self.now()

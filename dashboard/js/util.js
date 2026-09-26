@@ -7,11 +7,12 @@
   const fmtHMS = new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const fmtDate = new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
 
+  // Подписи — языком диспетчера; пороги: опоздание > 2 мин, риск 1–2 мин, раньше графика > 1 мин.
   const SEV = {
     critical: { label: 'Опоздание', short: 'Опоздание', color: 'var(--crit)', rank: 3 },
     warning: { label: 'Риск опоздания', short: 'Риск', color: 'var(--warn)', rank: 2 },
-    early: { label: 'Опережение', short: 'Опережение', color: 'var(--early)', rank: 1 },
-    ok: { label: 'В графике', short: 'В графике', color: 'var(--ok)', rank: 0 },
+    early: { label: 'Раньше графика', short: 'Раньше', color: 'var(--early)', rank: 1 },
+    ok: { label: 'По графику', short: 'По графику', color: 'var(--ok)', rank: 0 },
     unknown: { label: 'Нет данных', short: 'Нет данных', color: 'var(--unknown)', rank: -1 },
   };
 
@@ -94,6 +95,18 @@
       return lo;
     },
     cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); },
+    /** Класс задержки по порогам организаторов (target_class): early < −60 с, late > +120 с. */
+    classOf(d) { return d < -60 ? 'early' : d > 120 ? 'late' : 'ontime'; },
+    /** Уверенность словами по вероятности опоздания; null — модель вероятность не дала. */
+    confidence(prob) {
+      if (prob == null || isNaN(prob)) return null;
+      return prob >= 0.7 ? 'высокая' : prob >= 0.4 ? 'средняя' : 'низкая';
+    },
+    median(a) {
+      if (!a.length) return null;
+      const b = a.slice().sort((x, y) => x - y), m = b.length >> 1;
+      return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2;
+    },
   };
 
   /**

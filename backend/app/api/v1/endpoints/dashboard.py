@@ -36,9 +36,10 @@ async def get_predictions():
 
 
 @router.get("/predictions/verified", response_model=list[Verified], tags=["dashboard"])
-async def get_verified(limit: int = Query(80, ge=1, le=400)):
+async def get_verified(limit: int = Query(80, ge=1, le=20000),
+                       all: bool = Query(False, description="true — все прогнозы, иначе только 5-минутная сетка")):
     """Прогнозы, сверенные с фактом прибытия (replay), новые сверху."""
-    return pipeline.verified_out(limit)
+    return pipeline.verified_out(limit, all)
 
 
 @router.get("/metrics", response_model=Metrics, tags=["dashboard"])

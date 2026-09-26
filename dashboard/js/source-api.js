@@ -27,6 +27,11 @@
       this.speedBuf = new Map(); // tr -> [[t, speed]]
       this.fcBuf = new Map(); // tr -> Map(target_stop_id -> [target_time, pred, as_of])
       this.sched = new Map(); // tr -> {data, fetchedAt}
+      // История для «Аналитики» и «Журнала»: копится с момента открытия страницы,
+      // сверенные с фактом прогнозы backend отдаёт целиком (/predictions/verified?all=true).
+      this.predLog = new Map(); // sample_id -> запись
+      this.incLog = new Map(); // incident_id -> запись
+      this.hist = { t: [], critical: [], warning: [], early: [], ok: [], packets: [], latency: [] };
     }
 
     async get(path) {
@@ -104,6 +109,7 @@
           if (!i.prediction_status) i.prediction_status = (predictions.get(i.tr_id) || {}).status;
           return i;
         });
+        this.remember(now, predictions, incidents, metrics);
         this.last = { now, dataNow: now, down: false, vehicles, predictions, incidents, metrics };
         this.lastOk = Date.now() / 1000;
         this.error = null;
@@ -114,8 +120,68 @@
 
     async pollVerified() {
       try {
-        this.verified = (await this.get('/predictions/verified?limit=80')).map(normTimes);
+        const all = (await this.get('/predictions/verified?all=true&limit=20000')).map(normTimes);
+        this.verified = all.slice(0, 80);
+        for (const v of all) {
+          const key = v.sample_id || `${v.tr_id}_${v.as_of}`;
+          const r = this.predLog.get(key) || this.toRec(v, key);
+          r.outcome = v.outcome_delay_s;
+          r.outcome_at = v.target_time_begin + v.outcome_delay_s;
+          this.predLog.set(key, r);
+        }
       } catch (e) { /* эндпоинт необязателен */ }
+    }
+
+    toRec(p, key) {
+      const pred = p.prediction_delay_s;
+      return {
+        sample_id: key, as_of: p.as_of, tr_id: p.tr_id, target_stop_name: p.target_stop_name,
+        target_time_begin: p.target_time_begin, pred, late_probability: p.late_probability,
+        cur_dev: p.cur_dev_s, status: p.status, severity: p.severity || U.severityOf(pred, this.thr),
+        reason_title: p.reason ? p.reason.title : p.reason_title || null, outcome: null, outcome_at: null,
+      };
+    }
+
+    /** Запомнить прогнозы, инциденты и метрики для истории. */
+    remember(now, predictions, incidents, metrics) {
+      for (const p of predictions.values()) {
+        const key = p.sample_id || `${p.tr_id}_${p.as_of}`;
+        if (!this.predLog.has(key)) this.predLog.set(key, this.toRec(p, key));
+      }
+      for (const i of incidents) {
+        const prev = this.incLog.get(i.incident_id) || {};
+        this.incLog.set(i.incident_id, {
+          incident_id: i.incident_id, tr_id: i.tr_id, kind: i.kind, opened_at: i.first_detected_at,
+          closed_at: i.status === 'resolved' ? i.closed_at || i.updated_at : null,
+          peak: i.peak_severity, reason_title: i.suspected_reason ? i.suspected_reason.title : prev.reason_title,
+          alert_pred: i.alert_prediction_delay_s != null ? i.alert_prediction_delay_s : i.prediction_delay_s,
+          alert_target_name: i.alert_target_stop_name || i.target_stop_name,
+          alert_target_time: i.alert_target_time_begin || i.target_time_begin,
+          outcome: i.outcome_delay_s, fact_at: i.outcome_delay_s != null && i.alert_target_time_begin
+            ? i.alert_target_time_begin + i.outcome_delay_s : null,
+        });
+      }
+      const h = this.hist;
+      if (h.t.length && now - h.t[h.t.length - 1] < 30) return; // точка не чаще раза в 30 с
+      const c = { critical: 0, warning: 0, early: 0, ok: 0 };
+      for (const p of predictions.values()) if (c[p.severity] != null) c[p.severity]++;
+      h.t.push(now);
+      for (const k of Object.keys(c)) h[k].push(c[k]);
+      h.packets.push(metrics.packets_per_min != null ? metrics.packets_per_min : null);
+      h.latency.push(metrics.inference_latency_ms_p95 != null ? metrics.inference_latency_ms_p95 : null);
+      if (h.t.length > 5000) for (const k of Object.keys(h)) h[k].shift();
+    }
+
+    predictionRecords() {
+      return [...this.predLog.values()].sort((a, b) => a.as_of - b.as_of);
+    }
+
+    incidentRecords() {
+      return [...this.incLog.values()];
+    }
+
+    dayHistory() {
+      return this.hist;
     }
 
     clock() {

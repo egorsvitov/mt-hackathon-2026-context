@@ -155,13 +155,19 @@ class Incident(BaseModel):
 
 
 class Verified(BaseModel):
+    sample_id: Optional[str] = None
     as_of: datetime
     tr_id: TrId
+    route_id: Optional[str] = None
     target_time_begin: datetime
     target_stop_name: str
     prediction_delay_s: float
     outcome_delay_s: float
     cur_dev_s: Optional[float] = None
+    late_probability: Optional[float] = None
+    status: Optional[str] = None
+    severity: Optional[Severity] = None
+    reason_title: Optional[str] = None
 
 
 class Metrics(BaseModel):

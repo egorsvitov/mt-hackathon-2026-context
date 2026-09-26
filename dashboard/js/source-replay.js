@@ -70,6 +70,100 @@
       this.verI = ver.map((x) => x[1]);
 
       this.incidents = data.incidents.map((inc) => ({ ...inc, asof: inc.preds.map((i) => rows[i][c.as_of]) }));
+
+      // Журнал прогнозов по времени выпуска (для «Аналитики» и «Журнала»).
+      this.logI = rows.map((r, i) => i).sort((a, b) => rows[a][c.as_of] - rows[b][c.as_of]);
+      this.logT = this.logI.map((i) => rows[i][c.as_of]);
+      this.recCache = new Map();
+
+      // Картина дня: каждые 5 мин — число маршрутов по уровню риска и поток отметок.
+      const step = 300;
+      const t0 = Math.floor(m.day_start / step) * step;
+      const nb = Math.ceil((m.day_end - t0) / step) + 1;
+      const day = { t: [], critical: [], warning: [], early: [], ok: [], packets: [] };
+      for (let b = 0; b < nb; b++) {
+        day.t.push(t0 + b * step);
+        for (const k of ['critical', 'warning', 'early', 'ok', 'packets']) day[k].push(0);
+      }
+      for (const r of rows) {
+        if (r[c.as_of] % step) continue;
+        const b = Math.round((r[c.as_of] - t0) / step);
+        const sev = U.severityOf(r[c.prediction_delay_s], this.thr);
+        if (b >= 0 && b < nb && day[sev]) day[sev][b]++;
+      }
+      for (const T of this.tel.values()) {
+        for (const t of T.t) {
+          const b = Math.floor((t - t0) / step);
+          if (b >= 0 && b < nb) day.packets[b]++;
+        }
+      }
+      // Телеметрия в replay прорежена до 10 с — пересчёт в отметки/мин за 5-минутное окно.
+      day.packets = day.packets.map((x) => x / 5);
+      this.day = day;
+    }
+
+    /** Строка прогноза -> запись журнала (факт виден потребителю, только если outcome_at <= now). */
+    rec(i) {
+      let r = this.recCache.get(i);
+      if (r) return r;
+      const c = this.c, row = this.rows[i], m = this.meta;
+      const tr = row[c.tr_id], v = this.visits.get(tr);
+      const code = row[c.reason];
+      r = {
+        sample_id: `${tr}_${row[c.as_of] + 10800}`, as_of: row[c.as_of], tr_id: tr,
+        target_stop_name: this.network.stopName(v.stop[v.pos.get(row[c.target_stop_id])]),
+        target_time_begin: row[c.target_time_begin], pred: row[c.prediction_delay_s],
+        late_probability: row[c.late_probability], cur_dev: row[c.cur_dev_s], status: row[c.status],
+        severity: U.severityOf(row[c.prediction_delay_s], this.thr),
+        reason_title: code && m.reasons[code] ? m.reasons[code].title : null,
+        outcome: row[c.outcome_delay_s], outcome_at: row[c.outcome_at],
+      };
+      this.recCache.set(i, r);
+      return r;
+    }
+
+    /** Все прогнозы, выпущенные к dataNow (по времени выпуска). */
+    predictionRecords(now, dataNow) {
+      const n = U.countLE(this.logT, dataNow != null ? dataNow : now);
+      const out = new Array(n);
+      for (let k = 0; k < n; k++) out[k] = this.rec(this.logI[k]);
+      return out;
+    }
+
+    /** История инцидентов, открытых к dataNow. */
+    incidentRecords(now, dataNow) {
+      const t = dataNow != null ? dataNow : now;
+      const c = this.c, rows = this.rows;
+      const out = [];
+      for (const inc of this.incidents) {
+        if (inc.opened_at > t) continue;
+        const k = U.countLE(inc.asof, t) - 1;
+        if (k < 0) continue;
+        let head = null, peak = 'ok';
+        for (let q = 0; q <= k; q++) {
+          const i = inc.preds[q];
+          const sev = U.severityOf(rows[i][c.prediction_delay_s], this.thr);
+          if (ALERT[sev]) { head = i; if (U.SEV[sev].rank > U.SEV[peak].rank) peak = sev; }
+        }
+        const h = this.rec(head != null ? head : inc.preds[k]);
+        out.push({
+          incident_id: inc.incident_id, tr_id: inc.tr_id, kind: inc.kind, opened_at: inc.opened_at,
+          closed_at: inc.closed_at != null && inc.closed_at <= t ? inc.closed_at : null, peak,
+          reason_title: h.reason_title, alert_pred: h.pred, alert_target_name: h.target_stop_name,
+          alert_target_time: h.target_time_begin,
+          outcome: h.outcome_at != null && h.outcome_at <= now ? h.outcome : null,
+          fact_at: h.outcome_at != null && h.outcome_at <= now ? h.outcome_at : null,
+        });
+      }
+      return out;
+    }
+
+    /** Картина дня до момента now: t, число маршрутов по уровню риска, отметок/мин. */
+    dayHistory(now, dataNow) {
+      const n = U.countLE(this.day.t, dataNow != null ? dataNow : now);
+      const d = this.day, sl = (a) => a.slice(0, n);
+      return { t: sl(d.t), critical: sl(d.critical), warning: sl(d.warning), early: sl(d.early), ok: sl(d.ok),
+        packets: sl(d.packets), latency: null };
     }
 
     clock() { return this.meta.default_start; }

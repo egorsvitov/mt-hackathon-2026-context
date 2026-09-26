@@ -69,7 +69,7 @@ ML-модуль ──(prediction_delay_s, late_probability)──► Backend �
 | GET | `/predictions` | `Prediction[]` — последний прогноз по каждому ТС на линии | раз в 2 с |
 | GET | `/incidents` | `Incident[]` — активные и закрытые за последние 15 мин | раз в 2 с |
 | GET | `/metrics` | `Metrics` | раз в 2 с |
-| GET | `/predictions/verified?limit=80`? | `Verified[]` — прогнозы, сверенные с фактом | раз в 10 с |
+| GET | `/predictions/verified?all=true&limit=20000`? | `Verified[]` — прогнозы, сверенные с фактом (`all=false` — только 5-минутная сетка); поля: `sample_id`, `as_of`, `tr_id`, `target_time_begin`, `target_stop_name`, `prediction_delay_s`, `outcome_delay_s`, `cur_dev_s`, `late_probability`, `status`, `severity`, `reason_title` | раз в 10 с (для «Аналитики» и «Журнала») |
 | GET | `/config`? | `{thresholds, model}` | один раз |
 | GET | `/health/live`, `/health/ready` | статус | для Docker healthcheck |
 | POST | `/stream/telemetry` | приём записи телеметрии (`RawNDTPRecord`) от NDTP-парсера | — |

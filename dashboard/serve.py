@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import urllib.request
 import webbrowser
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -107,6 +108,14 @@ def main():
         print("! Нет data/replay.js — соберите: python dashboard/tools/build_fixtures.py --data-dir <dataset>")
     if not (ROOT / "data" / "basemap" / "moscow.pmtiles").exists():
         print("! Нет подложки карты — скачайте: python dashboard/tools/fetch_basemap.py")
+    if args.api:
+        try:
+            urllib.request.urlopen(args.api.rstrip("/") + "/health/live", timeout=2)
+        except Exception:
+            print(f"! Backend {args.api} не отвечает — дашборд покажет исторические данные.\n"
+                  "  Запустите его в отдельном окне:\n"
+                  "    cd backend && .venv\\Scripts\\python -m uvicorn app.main:app --port 8000   (Linux/macOS: .venv/bin/python)\n"
+                  "  или всё вместе: docker compose up --build", flush=True)
 
     handler = partial(RangeHandler, directory=str(ROOT))
     srv = None

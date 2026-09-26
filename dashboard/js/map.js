@@ -129,7 +129,11 @@
 
       m.addLayer({
         id: 'routes-line', type: 'line', source: 'routes', filter: ['!', ['get', 'dashed']], layout: round,
-        paint: { 'line-color': bySev(fsev), 'line-width': 3, 'line-opacity': ['case', fdim, 0.18, ['==', fsev, 'unknown'], 0.35, 0.75] },
+        paint: {
+          'line-color': bySev(fsev),
+          'line-width': ['match', fsev, 'critical', 4, 'warning', 3.5, 'early', 3, 2],
+          'line-opacity': ['case', fdim, 0.15, ['==', fsev, 'unknown'], 0.3, ['==', fsev, 'ok'], 0.4, 0.9],
+        },
       });
       m.addLayer({
         id: 'routes-dash', type: 'line', source: 'routes', filter: ['get', 'dashed'],
