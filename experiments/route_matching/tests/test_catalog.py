@@ -1,0 +1,64 @@
+from route_matching.catalog import Catalog, build_catalog, consensus
+from route_matching.types import Config, Event, Passage, RoadPath, Visit
+from conftest import edge
+
+
+class FakeGraph:
+    version = "g"
+
+    def __init__(self):
+        self.traces = 0
+        self.routes_called = 0
+
+    def trace(self, events, timeout=1):
+        self.traces += 1
+        raise AssertionError("No historical trace is eligible")
+
+    def routes(self, start, end):
+        self.routes_called += 1
+        return (RoadPath((edge(str(self.routes_called), start, end),)),)
+
+
+def test_cutoff_is_applied_before_matching_and_synthetic_is_excluded():
+    plan = (
+        Visit("1", 7, 1100, "a", (37.6, 55.75)),
+        Visit("2", 7, 1200, "b", (37.61, 55.75)),
+        Visit("x", 9_000_000, 1100, "a", (37.6, 55.75)),
+        Visit("y", 9_000_000, 1200, "b", (37.61, 55.75)),
+    )
+    history = [Event(7, 900, 37.6, 55.75), Event(7, 999, 37.601, 55.75),
+               Event(7, 998, 37.602, 55.75, receive_time=1001),
+               Event(7, 1001, 37.61, 55.75), Event(9_000_000, 900, 37.6, 55.75)]
+    graph = FakeGraph()
+    catalog = build_catalog(plan, history, 1000, graph)
+    assert catalog.report["allowed_events"] == 2
+    assert graph.traces == 0
+    assert {s.tr_id for s in catalog.sequences} == {7}
+    assert all(v.source == "osm_hypothesis" for vs in catalog.variants.values() for v in vs)
+
+
+def test_consensus_deduplicates_passages_and_selects_observed_medoid():
+    straight = RoadPath((edge("a", (37.6, 55.75), (37.61, 55.75)),))
+    detour = RoadPath((edge("b", (37.6, 55.75), (37.605, 55.755)),
+                       edge("c", (37.605, 55.755), (37.61, 55.75)),))
+    p1 = Passage("s", 7, "1", "2", 100, 200, 201, straight, .9)
+    duplicate = Passage("s", 7, "1", "2", 100, 200, 202, straight, .5)
+    p2 = Passage("s", 8, "1", "2", 110, 220, 221, straight, .8)
+    p3 = Passage("s", 9, "1", "2", 120, 240, 241, detour, .8)
+    variants = consensus([p1, duplicate, p2, p3], Config(cluster_distance=.2))
+    assert variants[0].support == 2
+    assert variants[0].confirmed
+    assert variants[0].path.signature == straight.signature
+    assert sum(v.support for v in variants) == 3
+
+
+def test_catalog_round_trip(tmp_path):
+    plan = (Visit("1", 7, 1100, "a", (37.6, 55.75)),
+            Visit("2", 7, 1200, "b", (37.61, 55.75)))
+    catalog = build_catalog(plan, [], 1000, FakeGraph())
+    path = tmp_path / "catalog.json"
+    catalog.save(path)
+    loaded = Catalog.load(path)
+    assert loaded.version == catalog.version
+    assert loaded.variants.keys() == catalog.variants.keys()
+    assert loaded.sequences[0].stops == catalog.sequences[0].stops

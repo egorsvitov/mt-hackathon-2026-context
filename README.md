@@ -12,6 +12,7 @@
 | [research/deep-research-report.md](research/deep-research-report.md) | Обзор литературы и рекомендации по ML-архитектуре |
 | [planning/architecture_after_research.md](planning/architecture_after_research.md) | Разбор отчёта, повторная проверка данных и предложение архитектуры |
 | [ml_models/01_catboost_baseline/](ml_models/01_catboost_baseline/) | Первый CatBoost baseline: код, обученная модель, submission, тесты и описание эксперимента |
+| [experiments/route_matching/](experiments/route_matching/) | Причинный каталог дорожных трасс, потоковый matcher, replay и пространственные признаки |
 | [research/papers/Wai_Zhou_2020_Real_Time_Bus_Time_Predictions.pdf](research/papers/Wai_Zhou_2020_Real_Time_Bus_Time_Predictions.pdf) | Wai & Zhou (2020): production-архитектура XGBoost-прогнозов времени движения и стоянки |
 
 ## Локальные данные
