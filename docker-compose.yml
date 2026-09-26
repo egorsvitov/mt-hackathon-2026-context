@@ -1,9 +1,18 @@
-# Backend (приём телеметрии, признаки, прогнозы, API) + дашборд диспетчера.
+# NDTP-парсер + backend (признаки, прогнозы, API) + дашборд диспетчера.
 # Перед первым запуском:
 #   python dashboard/tools/build_fixtures.py --data-dir <dataset>   # сеть маршрутов и replay
 #   python dashboard/tools/fetch_basemap.py                         # подложка карты (~60 МБ)
 # Запуск: DATA_DIR=<путь к датасету> docker compose up --build   ->  http://localhost:8080
 services:
+  ndtp-parser:
+    build: ./ndtp-parser
+    ports: ["${NDTP_PORT:-9201}:9201"]
+    environment:
+      BACKEND_URL: http://backend:8000/api/v1/stream/telemetry
+    depends_on:
+      backend:
+        condition: service_healthy
+
   backend:
     build: ./backend
     ports: ["${BACKEND_PORT:-8000}:8000"]
@@ -11,7 +20,7 @@ services:
       DATA_DIR: /data
       NETWORK_PATH: /refdata/network.json
       ML_SERVICE_URL: ${ML_SERVICE_URL:-http://ml-service:8001/predict}
-      REPLAY_AUTOSTART: "true"
+      REPLAY_AUTOSTART: ${REPLAY_AUTOSTART:-true}
       REPLAY_SPEED: ${REPLAY_SPEED:-1}
       REPLAY_START: ${REPLAY_START:-08:30}
     volumes:
