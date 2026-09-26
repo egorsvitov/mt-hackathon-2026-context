@@ -14,6 +14,7 @@
       this.network = new Network({
         stops: data.stops.map((s) => ({ stop_key: s[0], lat: s[1], lon: s[2], name: s[3] })),
         routes: data.routes,
+        route_patterns: data.route_patterns || [],
       });
 
       this.visits = new Map();
@@ -153,20 +154,22 @@
         packets += k + 1 - U.countLE(T.t, dataNow - 60);
         lastPacket = Math.max(lastPacket || 0, T.t[k]);
         const route = this.network.routeByTr.get(tr);
-        if (!route) continue; // hide telemetry without a planned/catalogued route
         let pos = k;
-        if (T.mm && !T.mm[k]) {
+        // Only scheduled/catalogued vehicles have an HMM route. Context vehicles
+        // remain visible at their raw GPS position instead of disappearing.
+        if (route && T.mm && !T.mm[k]) {
           pos = T.lastMm[k];
-          if (pos < 0 || T.t[k] - T.t[pos] > 180) continue;
+          if (pos < 0 || T.t[k] - T.t[pos] > 180) pos = k;
         }
         const age = now - T.t[pos];
         if (age > 3600) continue;
         const p = predictions.get(tr);
         vehicles.push({
-          tr_id: tr, unit_id: T.unit_id, route_id: route.route_id,
+          tr_id: tr, unit_id: T.unit_id, route_id: route ? route.route_id : null,
           event_time: T.t[pos], lat: T.lat[pos] / 1e5, lon: T.lon[pos] / 1e5, speed: T.spd[pos], heading: T.hdg[pos],
-          location_valid: true, data_age_s: age, position_quality: pos === k ? 'matched' : 'stale_match',
-          route_pattern_id: T.pattern ? T.pattern[pos] : null,
+          location_valid: true, data_age_s: age,
+          position_quality: route && T.mm && T.mm[pos] ? (pos === k ? 'matched' : 'stale_match') : 'raw',
+          route_pattern_id: route && T.pattern ? T.pattern[pos] : null,
           status: age <= 60 ? 'live' : age <= 300 ? 'stale' : 'offline',
           severity: p ? p.severity : 'unknown', in_service: !!p, source: 'replay',
         });

@@ -38,7 +38,7 @@ def _coordinates(variant: Variant) -> list[list[float]]:
 
 
 def dashboard_network(catalog: Catalog) -> dict:
-    """Materialize the legacy one-route-per-vehicle dashboard contract."""
+    """Materialize stops, vehicle trips and shared route patterns for the dashboard."""
     stop_by_id = {}
     for sequence in catalog.sequences:
         for stop in sequence.stops:
@@ -134,17 +134,95 @@ def dashboard_network(catalog: Catalog) -> dict:
                     "length_m": round(length_m, 2),
                 }
             )
+        route_pattern_ids = list(
+            dict.fromkeys(
+                sequence.route_pattern_id
+                for sequence in sequences
+                if sequence.route_pattern_id is not None
+            )
+        )
         routes.append(
             {
                 "route_id": f"R{tr_id}",
                 "tr_id": tr_id,
-                "name": f"Маршрут ТС {tr_id}",
+                "name": f"Рейс ТС {tr_id}",
                 "speed_norm_kmh": None,
+                "route_pattern_ids": route_pattern_ids,
+                "default_route_pattern_id": route_pattern_ids[0] if route_pattern_ids else None,
                 "stops": ordered_stops,
                 "segments": segments,
             }
         )
-    return {"stops": stops, "routes": routes}
+    # A route pattern is a line on the map. A route above is the schedule/trip
+    # assigned to one vehicle. Keeping both prevents the UI from implying that
+    # every vehicle is a separate public transport route.
+    route_patterns = []
+    for pattern in sorted(catalog.patterns, key=lambda item: item.route_pattern_id):
+        member_sequences = [
+            sequence
+            for sequence in catalog.sequences
+            if sequence.route_pattern_id == pattern.route_pattern_id
+        ]
+        if not member_sequences:
+            continue
+        tr_ids = sorted({sequence.tr_id for sequence in member_sequences})
+        candidates = []
+        for route in routes:
+            if route["tr_id"] not in tr_ids:
+                continue
+            candidates.extend(
+                segment
+                for segment in route["segments"]
+                if segment.get("route_pattern_id") == pattern.route_pattern_id
+            )
+        segment_by_key = {}
+        for segment in candidates:
+            key = (segment["from"], segment["to"], segment.get("segment_id"))
+            current = segment_by_key.get(key)
+            rank = (
+                {"observed": 0, "osm_hypothesis": 1, "direct": 2}.get(segment.get("source"), 3),
+                -int(segment.get("support") or 0),
+            )
+            if current is None or rank < current[0]:
+                segment_by_key[key] = (rank, segment)
+        pattern_segments = [item[1] for item in segment_by_key.values()]
+        pattern_segments.sort(
+            key=lambda segment: (
+                segment["from"],
+                segment["to"],
+                segment.get("segment_id") or "",
+            )
+        )
+        pattern_stops = [
+            stop_keys[stop_id] for stop_id in pattern.stop_ids if stop_id in stop_keys
+        ]
+        first = stop_by_id.get(pattern.stop_ids[0]) if pattern.stop_ids else None
+        last = stop_by_id.get(pattern.stop_ids[-1]) if pattern.stop_ids else None
+        first_name = (
+            next((v.address for v in first.visits if v.address.strip()), "Остановка б/н")
+            if first
+            else ""
+        )
+        last_name = (
+            next((v.address for v in last.visits if v.address.strip()), "Остановка б/н")
+            if last
+            else ""
+        )
+        route_patterns.append(
+            {
+                "route_pattern_id": pattern.route_pattern_id,
+                "direction_id": pattern.direction_id,
+                "name": (
+                    f"{first_name} → {last_name}"
+                    if first_name and last_name
+                    else "Маршрутный паттерн"
+                ),
+                "tr_ids": tr_ids,
+                "stops": pattern_stops,
+                "segments": pattern_segments,
+            }
+        )
+    return {"stops": stops, "route_patterns": route_patterns, "routes": routes}
 
 
 def write_dashboard_network(catalog: Catalog, path: str | Path) -> dict:

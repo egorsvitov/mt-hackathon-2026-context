@@ -10,7 +10,7 @@ router = APIRouter()
 
 @router.get("/network", response_model=Network, response_model_by_alias=True, tags=["dashboard"])
 async def get_network():
-    """Остановки и геометрия маршрутов (маршрут = нитка ТС). Загружается дашбордом один раз."""
+    """Остановки, общие маршрутные паттерны и рейсы ТС. Загружается один раз."""
     return pipeline.network.network_payload()
 
 

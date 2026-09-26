@@ -34,6 +34,7 @@ def write_matched_dashboard_replay(
         for stop in network["stops"]
     ]
     data["routes"] = network["routes"]
+    data["route_patterns"] = network.get("route_patterns", [])
 
     t0 = float(data["meta"]["t0"])
     records = []

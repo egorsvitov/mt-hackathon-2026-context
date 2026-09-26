@@ -81,6 +81,7 @@ class NetworkStore:
     def __init__(self):
         self.stops: dict[int, dict] = {}
         self.routes: dict[str, dict] = {}
+        self.route_patterns: list[dict] = []
         self.plans: dict[str, VehiclePlan] = {}
         self.loaded = False
         self.error: str | None = None
@@ -105,6 +106,7 @@ class NetworkStore:
         net = json.loads(path.read_text(encoding="utf-8"))
         self.stops = {int(s["stop_key"]): s for s in net["stops"]}
         self.routes = {str(r["tr_id"]): r for r in net["routes"]}
+        self.route_patterns = list(net.get("route_patterns", []))
 
     def _load_plan(self) -> None:
         split = Path(settings.DATA_DIR) / settings.SCHEDULE_SPLIT
@@ -154,8 +156,17 @@ class NetworkStore:
             A, B = self.stops[int(a)], self.stops[int(b)]
             segs.append({"from": int(a), "to": int(b), "synthetic": True, "path": [[A["lat"], A["lon"]], [B["lat"], B["lon"]]]})
         uniq = sorted({int(s) for s in stop})
-        return {"route_id": f"R{tr}", "tr_id": tr_out(tr), "name": f"Маршрут ТС {tr}", "speed_norm_kmh": None,
-                "stops": uniq, "segments": segs}
+        pattern_id = f"vehicle:{tr}"
+        return {
+            "route_id": f"R{tr}",
+            "tr_id": tr_out(tr),
+            "name": f"Рейс ТС {tr}",
+            "speed_norm_kmh": None,
+            "route_pattern_ids": [pattern_id],
+            "default_route_pattern_id": pattern_id,
+            "stops": uniq,
+            "segments": segs,
+        }
 
     # ------------------------------------------------------------------ запросы
 
@@ -171,4 +182,25 @@ class NetworkStore:
         return r.get("speed_norm_kmh") if r else None
 
     def network_payload(self) -> dict:
-        return {"stops": list(self.stops.values()), "routes": list(self.routes.values())}
+        patterns = list(self.route_patterns)
+        represented = {str(tr) for pattern in patterns for tr in pattern.get("tr_ids", [])}
+        for tr, route in self.routes.items():
+            if tr in represented:
+                continue
+            pattern_id = f"vehicle:{tr}"
+            segments = [{**segment, "route_pattern_id": pattern_id} for segment in route["segments"]]
+            patterns.append(
+                {
+                    "route_pattern_id": pattern_id,
+                    "direction_id": None,
+                    "name": route["name"],
+                    "tr_ids": [route["tr_id"]],
+                    "stops": route["stops"],
+                    "segments": segments,
+                }
+            )
+        return {
+            "stops": list(self.stops.values()),
+            "route_patterns": patterns,
+            "routes": list(self.routes.values()),
+        }

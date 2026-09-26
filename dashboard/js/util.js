@@ -103,20 +103,59 @@
   class Network {
     constructor(raw) {
       this.stops = new Map(raw.stops.map((s) => [s.stop_key, s]));
-      this.routes = raw.routes.slice().sort((a, b) => a.tr_id - b.tr_id);
-      this.routeByTr = new Map(this.routes.map((r) => [r.tr_id, r]));
+      // routes are vehicle-specific trips retained for schedules and alert sections.
+      this.trips = (raw.routes || []).slice().sort((a, b) => a.tr_id - b.tr_id);
+      this.routes = this.trips; // backwards-compatible name for the rest of the UI
+      this.routeByTr = new Map(this.trips.map((r) => [r.tr_id, r]));
+      this.defaultPatternByTr = new Map(this.trips
+        .filter((trip) => trip.default_route_pattern_id)
+        .map((trip) => [trip.tr_id, trip.default_route_pattern_id]));
       this.seg = new Map();
-      for (const r of this.routes) {
+      for (const r of this.trips) {
         const patterns = new Map();
         for (const s of r.segments) {
-          const pattern = s.route_pattern_id || "";
+          const pattern = s.route_pattern_id || `vehicle:${r.tr_id}`;
           if (!patterns.has(pattern)) patterns.set(pattern, new Map());
           patterns.get(pattern).set(`${s.from}-${s.to}`, s);
         }
         this.seg.set(r.tr_id, patterns);
       }
+
+      // route_patterns are shared map lines. Derive them for older fixtures.
+      const derived = new Map();
+      if (!raw.route_patterns || !raw.route_patterns.length) {
+        for (const trip of this.trips) {
+          for (const segment of trip.segments) {
+            const id = segment.route_pattern_id || `vehicle:${trip.tr_id}`;
+            if (!derived.has(id)) derived.set(id, {
+              route_pattern_id: id, direction_id: null, name: trip.name,
+              tr_ids: [], stops: trip.stops.slice(), segments: [],
+            });
+            const pattern = derived.get(id);
+            if (!pattern.tr_ids.includes(trip.tr_id)) pattern.tr_ids.push(trip.tr_id);
+            pattern.segments.push(segment);
+          }
+        }
+      }
+      this.patterns = (raw.route_patterns || [...derived.values()]).slice();
+      this.patternById = new Map(this.patterns.map((pattern) => [pattern.route_pattern_id, pattern]));
+      this.patternsByTr = new Map();
+      for (const pattern of this.patterns) {
+        for (const tr of pattern.tr_ids) {
+          if (!this.patternsByTr.has(tr)) this.patternsByTr.set(tr, []);
+          this.patternsByTr.get(tr).push(pattern);
+        }
+      }
     }
     stopName(key) { const s = this.stops.get(key); return s ? s.name : '—'; }
+
+    patternForTr(tr, preferredId) {
+      if (preferredId && this.patternById.has(preferredId)) return this.patternById.get(preferredId);
+      const fallback = this.defaultPatternByTr.get(tr);
+      if (fallback && this.patternById.has(fallback)) return this.patternById.get(fallback);
+      const choices = this.patternsByTr.get(tr) || [];
+      return choices.length === 1 ? choices[0] : null;
+    }
 
     /** Отдельные дорожные полилинии между посещениями i..j для одного паттерна. */
     sectionPaths(tr, visits, i, j, routePatternId = null) {

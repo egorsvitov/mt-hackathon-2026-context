@@ -18,20 +18,23 @@
 
   function buildRoutes(net, activePatterns) {
     const features = [];
-    for (const r of net.routes) {
+    net.patterns.forEach((pattern, index) => {
+      const selectedForMembers = pattern.tr_ids.map((tr) =>
+        activePatterns && activePatterns.get(tr) || net.defaultPatternByTr.get(tr),
+      ).filter(Boolean);
+      if (selectedForMembers.length && !selectedForMembers.includes(pattern.route_pattern_id)) return;
       for (const dashed of [false, true]) {
-        const active = activePatterns && activePatterns.get(r.tr_id);
-        const lines = r.segments
-          .filter((s) => !!s.synthetic === dashed && (!active || s.route_pattern_id === active))
-          .map((s) => s.path.map(lngLat));
+        const lines = pattern.segments
+          .filter((segment) => !!segment.synthetic === dashed)
+          .map((segment) => segment.path.map(lngLat));
         if (!lines.length) continue;
         features.push({
-          type: 'Feature', id: r.tr_id * 2 + (dashed ? 1 : 0),
-          properties: { tr_id: r.tr_id, dashed },
+          type: 'Feature', id: index * 2 + (dashed ? 1 : 0),
+          properties: { pattern_id: pattern.route_pattern_id, dashed },
           geometry: { type: 'MultiLineString', coordinates: lines },
         });
       }
-    }
+    });
     return fc(features);
   }
 
@@ -39,7 +42,7 @@
     /**
      * @param el      id или элемент контейнера
      * @param net     Network (util.js)
-     * @param h       {onSelect(tr), routeTooltip(tr) -> html, vehTooltip(tr) -> html}
+     * @param h       {onSelect(tr), onSelectPattern(id), routePatternTooltip(id), vehTooltip(tr)}
      */
     constructor(el, net, h) {
       this.el = typeof el === 'string' ? document.getElementById(el) : el;
@@ -125,7 +128,7 @@
       const fsev = ['coalesce', ['feature-state', 'sev'], 'unknown'];
       const fdim = ['boolean', ['feature-state', 'dim'], false];
       const round = { 'line-cap': 'round', 'line-join': 'round' };
-      const selFilter = ['==', ['get', 'tr_id'], this.sel == null ? -1 : this.sel];
+      const selFilter = ['==', ['get', 'pattern_id'], this.sel || ''];
 
       m.addLayer({
         id: 'routes-line', type: 'line', source: 'routes', filter: ['!', ['get', 'dashed']], layout: round,
@@ -174,7 +177,7 @@
       const m = this.map;
       this.eventsBound = true;
       const hover = {
-        'routes-hit': (f) => this.h.routeTooltip(f.properties.tr_id),
+        'routes-hit': (f) => this.h.routePatternTooltip(f.properties.pattern_id),
         targets: (f) => f.properties.html,
         stops: (f) => U.esc(f.properties.name),
       };
@@ -189,7 +192,10 @@
       m.on('click', (e) => {
         const layers = ['targets', 'routes-hit'].filter((id) => m.getLayer(id));
         const f = m.queryRenderedFeatures(e.point, { layers })[0];
-        if (f) this.h.onSelect(f.properties.tr_id);
+        if (f) {
+          if (f.layer.id === 'routes-hit') this.h.onSelectPattern(f.properties.pattern_id);
+          else this.h.onSelect(f.properties.tr_id);
+        }
       });
     }
 
@@ -208,22 +214,25 @@
       this.setSource('routes', this.routes);
     }
 
-    /** sev: Map(tr_id -> severity); sel — выбранное ТС или null. */
+    /** sev: Map(route_pattern_id -> severity); sel — выбранный паттерн или null. */
     setRoutes(sev, sel) {
       if (!this.map) return;
       if (sel !== this.sel) {
         this.sel = sel;
-        if (this.ready) this.map.setFilter('routes-selected', ['all', ['==', ['get', 'tr_id'], sel == null ? -1 : sel], ['!', ['get', 'dashed']]]);
+        if (this.ready) this.map.setFilter('routes-selected', ['all', ['==', ['get', 'pattern_id'], sel || ''], ['!', ['get', 'dashed']]]);
       }
-      for (const r of this.net.routes) {
-        const st = { sev: sev.get(r.tr_id) || 'unknown', dim: sel != null && sel !== r.tr_id };
+      this.net.patterns.forEach((pattern, index) => {
+        const st = {
+          sev: sev.get(pattern.route_pattern_id) || 'unknown',
+          dim: sel != null && sel !== pattern.route_pattern_id,
+        };
         const key = `${st.sev}:${st.dim}`;
-        for (const id of [r.tr_id * 2, r.tr_id * 2 + 1]) {
+        for (const id of [index * 2, index * 2 + 1]) {
           if (this.routeState.get(id) && this.routeState.get(id)._k === key) continue;
           this.routeState.set(id, { ...st, _k: key });
           if (this.ready) this.map.setFeatureState({ source: 'routes', id }, st);
         }
-      }
+      });
     }
 
     /** list: [{tr, path: [[lat, lon]], sev, stale, dim, target: {lat, lon, html}}] */

@@ -276,7 +276,8 @@
   function initMap() {
     App.dmap = new DashMap('map', App.net, {
       onSelect: (tr) => select(tr),
-      routeTooltip: (tr) => routeTooltip(App.net.routeByTr.get(tr)),
+      onSelectPattern: (id) => selectPattern(id),
+      routePatternTooltip: (id) => routePatternTooltip(id),
       vehTooltip: (tr) => vehTooltip(tr),
     });
     if (!App.dmap.init(themeName(), App.colors)) {
@@ -287,16 +288,41 @@
       ['early', 'Опережение, > 1 мин'], ['unknown', 'Нет прогноза'],
     ].map(([s, t]) => `<div class="row">${U.sevIcon(s, 12)}<span class="line" style="--c:${U.SEV[s].color}"></span>${t}</div>`).join('') +
       '<div class="row extra"><span style="width:12px"></span><span class="line dash"></span>участок без GPS-геометрии</div>' +
+      '<div class="row extra"><span style="width:12px"></span><svg width="22" height="12"><circle cx="11" cy="6" r="3.5" fill="var(--unknown)"/></svg>ТС без расписания · контекст</div>' +
       '<div class="row extra"><span style="width:12px"></span><svg width="22" height="12"><circle cx="11" cy="6" r="4.5" fill="none" stroke="var(--text-2)" stroke-width="2.5"/></svg>целевая остановка прогноза</div>';
   }
 
   function fitNetwork() { App.dmap.fitNetwork(); }
 
-  function routeTooltip(r) {
-    if (!r) return '';
-    const p = App.snap && App.snap.predictions.get(r.tr_id);
-    return `<b>${U.esc(r.name)}</b><br><span class="muted">Маршрут восстановлен по нитке ТС ${r.tr_id}</span>` +
-      (p ? `<br>${U.sevBadge(p.severity)} прогноз ${U.delay(p.prediction_delay_s)}` : '<br><span class="muted">сейчас не на линии</span>');
+  function vehiclesForPattern(id) {
+    if (!App.snap) return [];
+    const pattern = App.net.patternById.get(id);
+    if (!pattern) return [];
+    const active = App.snap.vehicles.filter((v) => v.route_pattern_id === id);
+    if (active.length) return active;
+    const members = new Set(pattern.tr_ids);
+    return App.snap.vehicles.filter((v) => members.has(v.tr_id));
+  }
+
+  function selectPattern(id) {
+    const vehicles = vehiclesForPattern(id);
+    if (!vehicles.length) return;
+    vehicles.sort((a, b) => {
+      const pa = App.snap.predictions.get(a.tr_id), pb = App.snap.predictions.get(b.tr_id);
+      return (pb ? U.SEV[pb.severity].rank : -1) - (pa ? U.SEV[pa.severity].rank : -1);
+    });
+    select(vehicles[0].tr_id);
+  }
+
+  function routePatternTooltip(id) {
+    const pattern = App.net.patternById.get(id);
+    if (!pattern) return '';
+    const vehicles = vehiclesForPattern(id);
+    const risks = vehicles.map((v) => App.snap.predictions.get(v.tr_id)).filter(Boolean)
+      .sort((a, b) => U.SEV[b.severity].rank - U.SEV[a.severity].rank);
+    const ids = vehicles.map((v) => v.tr_id).join(', ');
+    return `<b>${U.esc(pattern.name)}</b><br><span class="muted">Маршрутный паттерн · ${vehicles.length} ТС${ids ? `: ${ids}` : ''}</span>` +
+      (risks.length ? `<br>${U.sevBadge(risks[0].severity)} максимальный риск ${U.delay(risks[0].prediction_delay_s)}` : '<br><span class="muted">нет активного прогноза</span>');
   }
 
   function vehTooltip(tr) {
@@ -338,17 +364,22 @@
     const dm = App.dmap;
     if (!dm || !dm.map) return;
 
-    // Линии маршрутов: цвет — уровень риска ТС на маршруте.
-    const sev = new Map();
-    for (const r of App.net.routes) {
-      const p = s.predictions.get(r.tr_id);
-      sev.set(r.tr_id, p ? p.severity : 'unknown');
-    }
+    // Линия принадлежит маршрутному паттерну, а риск агрегируется по всем ТС на ней.
     const activePatterns = new Map(
       s.vehicles.filter((v) => v.route_pattern_id).map((v) => [v.tr_id, v.route_pattern_id]),
     );
+    const sev = new Map();
+    for (const pattern of App.net.patterns) {
+      const predictions = pattern.tr_ids.map((tr) => s.predictions.get(tr)).filter(Boolean);
+      predictions.sort((a, b) => U.SEV[b.severity].rank - U.SEV[a.severity].rank);
+      sev.set(pattern.route_pattern_id, predictions.length ? predictions[0].severity : 'unknown');
+    }
+    const selectedVehicle = App.sel == null ? null : s.vehicles.find((v) => v.tr_id === App.sel);
+    const selectedPattern = App.sel == null ? null : App.net.patternForTr(
+      App.sel, selectedVehicle && selectedVehicle.route_pattern_id,
+    );
     dm.setActivePatterns(activePatterns);
-    dm.setRoutes(sev, App.sel);
+    dm.setRoutes(sev, selectedPattern ? selectedPattern.route_pattern_id : null);
 
     // Проблемные участки: от последней пройденной остановки до целевой.
     // В режиме API расписание подгружается асинхронно, поэтому раз в ~16 с участки пересобираются.
@@ -477,10 +508,10 @@
       return `<button class="kpi alert${hot ? ' hot' : ''}" style="--c:${U.SEV[sev].color}" data-filter="${sev}" title="Показать маршруты: ${label}">` +
         `<span class="label">${U.sevIcon(sev, 13)}${label}</span><span class="value">${value}</span><span class="sub">${sub}</span></button>`;
     };
-    const pct = (x) => (inService ? `${Math.round((x / inService) * 100)}% маршрутов` : '—');
+    const pct = (x) => (inService ? `${Math.round((x / inService) * 100)}% ТС` : '—');
     const lastAge = m.last_packet_at ? App.now - m.last_packet_at : null;
     const html = [
-      `<div class="kpi"><span class="label">На линии</span><span class="value">${inService}<small style="font-size:13px;color:var(--muted);font-weight:500"> / ${App.net.routes.length}</small></span><span class="sub">маршрутов с прогнозом</span></div>`,
+      `<div class="kpi"><span class="label">На линии</span><span class="value">${inService}<small style="font-size:13px;color:var(--muted);font-weight:500"> / ${App.net.routes.length}</small></span><span class="sub">ТС с прогнозом</span></div>`,
       tile('critical', 'Опоздание', c.critical, pct(c.critical)),
       tile('warning', 'Риск опоздания', c.warning, pct(c.warning)),
       tile('ok', 'В графике', c.ok, pct(c.ok)),
@@ -497,8 +528,11 @@
   // ------------------------------------------------------------------ боковая панель
 
   function routeName(tr) {
-    const r = App.net.routeByTr.get(tr);
-    return r ? r.name : 'маршрут не восстановлен';
+    const v = App.snap && App.snap.vehicles.find((item) => item.tr_id === tr);
+    const pattern = App.net.patternForTr(tr, v && v.route_pattern_id);
+    if (pattern) return pattern.name;
+    const trip = App.net.routeByTr.get(tr);
+    return trip ? trip.name : 'маршрут не восстановлен';
   }
 
   function incidentCard(i) {
@@ -554,23 +588,46 @@
 
   function renderRoutes(s) {
     const vById = new Map(s.vehicles.map((v) => [v.tr_id, v]));
-    let rows = App.net.routes.map((r) => ({ r, p: s.predictions.get(r.tr_id), v: vById.get(r.tr_id) }));
-    rows.sort((a, b) => {
-      const ra = a.p ? U.SEV[a.p.severity].rank : -2, rb = b.p ? U.SEV[b.p.severity].rank : -2;
-      return rb - ra || (b.p ? b.p.prediction_delay_s : 0) - (a.p ? a.p.prediction_delay_s : 0);
+    const groups = new Map();
+    for (const trip of App.net.trips) {
+      const v = vById.get(trip.tr_id);
+      const pattern = App.net.patternForTr(trip.tr_id, v && v.route_pattern_id);
+      const key = pattern ? pattern.route_pattern_id : `trip:${trip.tr_id}`;
+      if (!groups.has(key)) groups.set(key, { pattern, name: pattern ? pattern.name : trip.name, rows: [] });
+      groups.get(key).rows.push({ trip, p: s.predictions.get(trip.tr_id), v });
+    }
+    let list = [...groups.values()];
+    for (const group of list) {
+      group.rows.sort((a, b) => {
+        const ra = a.p ? U.SEV[a.p.severity].rank : -2, rb = b.p ? U.SEV[b.p.severity].rank : -2;
+        return rb - ra || (b.p ? b.p.prediction_delay_s : 0) - (a.p ? a.p.prediction_delay_s : 0);
+      });
+      group.worst = group.rows.find((row) => row.p);
+    }
+    list.sort((a, b) => {
+      const ra = a.worst ? U.SEV[a.worst.p.severity].rank : -2;
+      const rb = b.worst ? U.SEV[b.worst.p.severity].rank : -2;
+      return rb - ra || a.name.localeCompare(b.name, 'ru');
     });
-    if (App.filter) rows = rows.filter((x) => x.p && x.p.severity === App.filter);
-    $('n-routes').textContent = App.net.routes.length;
+    if (App.filter) {
+      list = list.map((group) => ({ ...group, rows: group.rows.filter((row) => row.p && row.p.severity === App.filter) }))
+        .filter((group) => group.rows.length);
+    }
+    $('n-routes').textContent = groups.size;
     let html = App.filter
       ? `<div class="section-title" style="display:flex;justify-content:space-between">Фильтр: ${U.SEV[App.filter].label}<a href="#" data-action="clear-filter" style="color:var(--accent)">сбросить</a></div>` : '';
-    html += rows.map(({ r, p, v }) => {
-      const sev = p ? p.severity : 'unknown';
-      const sel = App.sel === r.tr_id ? ' sel' : '';
-      const sub = p ? `ТС ${r.tr_id} · ${v ? `${U.num(v.speed)} км/ч` : 'нет GPS'} · к «${U.esc(p.target_stop_name)}» ${U.time(p.target_time_begin)}` : `ТС ${r.tr_id} · сейчас не на линии`;
-      return `<div class="rrow${sel}" style="--c:${U.SEV[sev].color}" data-tr="${r.tr_id}">` +
-        `<div class="n">${U.esc(r.name)}</div><div class="v num">${p ? U.delay(p.prediction_delay_s) : '—'}</div>` +
-        `<div class="m">${sub}</div><div>${U.sevBadge(sev, U.SEV[sev].short)}</div></div>`;
-    }).join('') || '<div class="empty">Нет маршрутов в этом состоянии</div>';
+    html += list.map((group) => {
+      const title = `<div class="section-title" style="text-transform:none;letter-spacing:0">${U.esc(group.name)} · ${group.rows.length} ТС</div>`;
+      const vehicles = group.rows.map(({ trip, p, v }) => {
+        const sev = p ? p.severity : 'unknown';
+        const sel = App.sel === trip.tr_id ? ' sel' : '';
+        const sub = p ? `${v ? `${U.num(v.speed)} км/ч` : 'нет GPS'} · к «${U.esc(p.target_stop_name)}» ${U.time(p.target_time_begin)}` : 'сейчас без прогноза';
+        return `<div class="rrow${sel}" style="--c:${U.SEV[sev].color}" data-tr="${trip.tr_id}">` +
+          `<div class="n">ТС ${trip.tr_id}</div><div class="v num">${p ? U.delay(p.prediction_delay_s) : '—'}</div>` +
+          `<div class="m">${sub}</div><div>${U.sevBadge(sev, U.SEV[sev].short)}</div></div>`;
+      }).join('');
+      return title + vehicles;
+    }).join('') || '<div class="empty">Нет маршрутных паттернов в этом состоянии</div>';
     if (html !== App.html.routes) { App.html.routes = html; $('tab-routes').innerHTML = html; }
   }
 
@@ -817,7 +874,11 @@
     if (App.tab === 'incidents') renderIncidents(s);
     else { $('n-inc').textContent = s.incidents.filter((i) => i.status === 'active').length; }
     if (App.tab === 'routes') renderRoutes(s);
-    else $('n-routes').textContent = App.net.routes.length;
+    else {
+      const active = new Set(s.vehicles.filter((v) => v.route_id)
+        .map((v) => (App.net.patternForTr(v.tr_id, v.route_pattern_id) || {}).route_pattern_id || `trip:${v.tr_id}`));
+      $('n-routes').textContent = active.size;
+    }
     if (App.tab === 'verified') renderVerified(s);
     else $('n-ver').textContent = s.metrics && s.metrics.n_verified_grid5 != null ? s.metrics.n_verified_grid5 : (s.verified || []).length;
     renderDrawer(s);

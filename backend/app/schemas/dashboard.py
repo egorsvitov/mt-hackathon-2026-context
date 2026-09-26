@@ -39,13 +39,25 @@ class Route(BaseModel):
     tr_id: TrId
     name: str
     speed_norm_kmh: Optional[float] = None
+    route_pattern_ids: list[str] = Field(default_factory=list)
+    default_route_pattern_id: Optional[str] = None
+    stops: list[int]
+    segments: list[RouteSegment]
+
+
+class RoutePattern(BaseModel):
+    route_pattern_id: str
+    direction_id: Optional[str] = None
+    name: str
+    tr_ids: list[TrId]
     stops: list[int]
     segments: list[RouteSegment]
 
 
 class Network(BaseModel):
     stops: list[Stop]
-    routes: list[Route]
+    route_patterns: list[RoutePattern] = Field(default_factory=list)
+    routes: list[Route] = Field(..., description="Рейсы/плановые траектории конкретных ТС")
 
 
 class Visit(BaseModel):
