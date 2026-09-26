@@ -7,5 +7,7 @@
 | № | Модель | Основной результат |
 |---:|---|---|
 | 01 | [CatBoost baseline](01_catboost_baseline/) | Residual CatBoost: test MAE 72,49 с против 93,36 с у `cur_dev_s` |
+| 02 | [Route-aware run/dwell](02_route_components/) | Global component + map-aware residual CatBoost: test MAE 64,21 с |
 
 Новый эксперимент следует добавлять новой папкой, не переписывая результаты предыдущих.
+

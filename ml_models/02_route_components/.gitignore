@@ -6,6 +6,8 @@ artifacts/features/
 artifacts/events/
 artifacts/modeling/model/
 artifacts/modeling/component_models/
+artifacts/modeling/evaluation_model/
+artifacts/modeling/evaluation_components/
 artifacts/modeling/test_predictions.csv
 artifacts/modeling/submission.csv
 
