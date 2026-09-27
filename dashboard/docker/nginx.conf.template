@@ -1,5 +1,4 @@
-# Статика дашборда + прокси /api/ -> backend (без CORS). BACKEND_URL задаётся в окружении.
-# Range-запросы к data/basemap/moscow.pmtiles nginx обслуживает сам (статический файл).
+# Статика дашборда и прокси /api/ на backend, адрес backend берётся из BACKEND_URL.
 server {
     listen 80;
     root /usr/share/nginx/html;
@@ -18,7 +17,7 @@ server {
     }
 
     location /api/ {
-        # Резолвим backend при запросе, а не при старте: nginx поднимется и без backend.
+        # имя backend резолвим при запросе, чтобы nginx поднимался и без него
         resolver 127.0.0.11 valid=10s ipv6=off;
         set $backend ${BACKEND_URL};
         # Путь передаётся как есть: /api/v1/metrics -> backend /api/v1/metrics

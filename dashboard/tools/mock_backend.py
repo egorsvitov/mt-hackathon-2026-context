@@ -1,13 +1,7 @@
-"""Mock-backend по контракту дашборда (CONTRACT.md) — эталон для настоящего backend.
+"""Mock-backend с теми же ответами, что у настоящего backend (см. CONTRACT.md).
 
-Отдаёт те же эндпоинты, что будет отдавать FastAPI-backend, но данные берёт из
-``data/replay.js`` и крутит виртуальные часы. Нужен, чтобы:
-
-* проверить дашборд в режиме LIVE (``index.html?api=http://localhost:8000``);
-* показать backend-разработчику точный формат ответов;
-* отрепетировать деградацию: ``/demo/link?down=1`` — «обрыв потока NDTP».
-
-Только стандартная библиотека Python::
+Данные берёт из data/replay.js и крутит свои часы. Пригодится, чтобы проверить дашборд
+в режиме LIVE без backend или показать формат ответов.
 
     python dashboard/tools/mock_backend.py --port 8000 --speed 10
 """
@@ -28,13 +22,14 @@ from incident_rules import THRESHOLDS  # noqa: E402
 
 
 class Clock:
-    """Виртуальные часы воспроизведения с зацикливанием по дню."""
+    """Часы воспроизведения, по кругу в пределах дня."""
 
     def __init__(self, start: int, end: int, speed: float, begin: int):
         self.start, self.end, self.speed = start, end, speed
         self.t0_wall, self.t0 = time.time(), begin
 
     def now(self) -> int:
+        """Текущее время воспроизведения."""
         t = self.t0 + (time.time() - self.t0_wall) * self.speed
         if t > self.end:
             self.t0_wall, self.t0 = time.time(), self.start
@@ -43,11 +38,13 @@ class Clock:
 
 
 def load_replay(path: Path) -> dict:
+    """Читает data/replay.js, тот же файл, что использует дашборд."""
     text = path.read_text(encoding="utf-8")
     return json.loads(text[text.index("=") + 1:].rstrip().rstrip(";"))
 
 
 def make_handler(replay: dict, clock: Clock, state: dict):
+    """Собирает обработчик запросов поверх данных воспроизведения."""
     meta = replay["meta"]
     network = {
         "stops": [{"stop_key": s[0], "lat": s[1], "lon": s[2], "name": s[3]} for s in replay["stops"]],
@@ -58,6 +55,7 @@ def make_handler(replay: dict, clock: Clock, state: dict):
     stop_names = {s[0]: s[3] for s in replay["stops"]}
 
     def live_snapshot():
+        """Состояние на текущий момент часов в формате ответов backend."""
         now = clock.now()
         if state["down_since"] is not None:
             snap = snapshot(replay, state["down_since"])
@@ -75,6 +73,7 @@ def make_handler(replay: dict, clock: Clock, state: dict):
         return now, snap
 
     def verified(now: int, limit: int):
+        """Сверенные прогнозы на текущий момент часов."""
         c = cols
         out = []
         for r in rows:
@@ -98,10 +97,12 @@ def make_handler(replay: dict, clock: Clock, state: dict):
         return res
 
     class Handler(BaseHTTPRequestHandler):
-        def log_message(self, fmt, *args):  # тихий лог
+        """Отвечает на те же пути, что настоящий backend."""
+        def log_message(self, fmt, *args):
             pass
 
         def send_json(self, obj, code=200):
+            """Отправляет объект как JSON."""
             body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -112,6 +113,7 @@ def make_handler(replay: dict, clock: Clock, state: dict):
             self.wfile.write(body)
 
         def do_GET(self):  # noqa: N802
+            """Разбирает путь и отдаёт нужный ответ."""
             u = urlparse(self.path)
             q = parse_qs(u.query)
             path = u.path.rstrip("/") or "/"
@@ -151,6 +153,7 @@ def make_handler(replay: dict, clock: Clock, state: dict):
 
 
 def main():
+    """Запускает mock-backend на указанном порту."""
     here = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--replay", default=str(here.parent / "data" / "replay.js"))

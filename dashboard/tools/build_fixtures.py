@@ -1,27 +1,11 @@
-"""Сборка данных для дашборда в режиме REPLAY (воспроизведение дня из датасета).
+"""Сборка данных для воспроизведения дня на дашборде без backend.
 
-Что делает скрипт:
+Скрипт восстанавливает маршруты ТС по расписанию и GPS, выпускает прогнозные точки так же,
+как backend (каждые --grid-step секунд, остановка через 10-15 минут), получает прогнозы
+демо-моделью или из --predictions и пишет data/replay.js и примеры ответов в contract/examples.
 
-1. Восстанавливает «маршрутную сеть» по расписанию и GPS: у каждого реального ТС
-   свой набор остановок, поэтому маршрут = нитка ТС; геометрия участков между
-   остановками берётся из GPS-трека, а не прямыми отрезками.
-2. Выпускает прогнозные точки так же, как будет делать backend онлайн: каждые
-   ``--grid-step`` секунд для каждого ТС берётся первая плановая остановка в окне
-   ``(T+10 мин, T+15 мин]``. Точки сохраняются в ``points_grid.csv`` в формате
-   ``validate/points.csv``.
-3. Получает прогноз задержки:
-   * по умолчанию — встроенной демо-моделью (sklearn, обучение на ``labels_train``);
-   * либо из ``--predictions preds.csv`` в формате сабмита ``sample_id;prediction``
-     (опционально колонка ``late_probability``) — так подключается модель команды.
-4. Считает уровень риска, гипотезу причины и рекомендацию (``incident_rules.py``),
-   собирает инциденты и пишет ``data/replay.js`` для дашборда и примеры
-   ответов backend в ``contract/examples/``.
-
-Все признаки считаются только по данным с ``event_time <= T``. Фактическое время
-прибытия (``time_fact_begin``) используется лишь как исход для проверки прогноза
-и показывается на дашборде только после того, как это время наступило.
-
-Запуск::
+Признаки считаются только по данным не позже T. Факт прибытия нужен лишь для сверки прогноза
+и показывается, когда его время наступило.
 
     python dashboard/tools/build_fixtures.py --data-dir ../dataset
     python dashboard/tools/build_fixtures.py --data-dir ../dataset --predictions preds.csv
@@ -51,11 +35,11 @@ from incident_rules import (  # noqa: E402
     severity_of,
 )
 
-MSK_OFFSET_S = 3 * 3600  # метки времени в датасете — наивные, московское время
-H_MIN, H_MAX = 600, 900  # окно прогноза (T+10 мин, T+15 мин]
-FALLBACK_GPS_AGE_S = 900  # старше — прогноз модели не выпускаем, fallback = cur_dev_s
+MSK_OFFSET_S = 3 * 3600  # время в датасете московское, без зоны
+H_MIN, H_MAX = 600, 900
+FALLBACK_GPS_AGE_S = 900  # если GPS старше, модель не зовём и берём текущее отклонение
 ALERT_KINDS = {"warning": "late", "critical": "late", "early": "early"}
-INCIDENT_COOLDOWN = 3  # столько прогнозов подряд без риска закрывают инцидент
+INCIDENT_COOLDOWN = 3
 
 MODEL_FEATURES = [
     "cur_dev_s", "horizon_s", "hour_sin", "hour_cos", "speed_5m_kmh", "speed_15m_kmh",
@@ -64,20 +48,19 @@ MODEL_FEATURES = [
 ]
 
 
-# ----------------------------------------------------------------------------- утилиты
-
 def naive_sec(values) -> np.ndarray:
-    """Наивные метки (МСК) -> секунды так, как в ``sample_id`` (время как будто UTC)."""
+    """Московское время из датасета в секунды так, как в sample_id (будто это UTC)."""
     d = pd.to_datetime(pd.Series(values))
     return ((d - pd.Timestamp("1970-01-01")) / pd.Timedelta(seconds=1)).to_numpy(dtype=float)
 
 
 def to_epoch(naive_s: float) -> int:
-    """Секунды «наивного» времени -> настоящий Unix epoch (МСК = UTC+3)."""
+    """Секунды наивного московского времени в настоящее Unix-время."""
     return int(round(naive_s - MSK_OFFSET_S))
 
 
 def iso_msk(epoch_s: float | None) -> str | None:
+    """Unix-время в строку ISO 8601 с зоной +03:00."""
     if epoch_s is None or (isinstance(epoch_s, float) and math.isnan(epoch_s)):
         return None
     ts = pd.Timestamp(int(epoch_s) + MSK_OFFSET_S, unit="s")
@@ -85,13 +68,14 @@ def iso_msk(epoch_s: float | None) -> str | None:
 
 
 def haversine_m(lat1, lon1, lat2, lon2):
+    """Расстояние по поверхности Земли в метрах, работает и с массивами numpy."""
     lat1, lon1, lat2, lon2 = map(np.radians, (lat1, lon1, lat2, lon2))
     a = np.sin((lat2 - lat1) / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2
     return 2 * 6371000.0 * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
 
 
 def clean(x, nd=1):
-    """Число для JSON: NaN -> None, округление."""
+    """Число для JSON: NaN превращает в None и округляет."""
     if x is None:
         return None
     x = float(x)
@@ -100,9 +84,8 @@ def clean(x, nd=1):
     return round(x, nd) if nd else int(round(x))
 
 
-# ----------------------------------------------------------------------------- данные
-
 def load_traffic(path: Path) -> pd.DataFrame:
+    """Читает telemetry одной части датасета и оставляет точки с валидными координатами."""
     df = pd.read_csv(path, usecols=["tr_id", "unit_id", "event_time", "location_valid",
                                     "lon", "lat", "speed", "heading"])
     df["t"] = naive_sec(df["event_time"])
@@ -117,7 +100,7 @@ def load_traffic(path: Path) -> pd.DataFrame:
 
 
 class Track:
-    """GPS-трек одного ТС с быстрыми запросами «состояние на момент T»."""
+    """GPS-трек одного ТС с быстрым поиском состояния на момент T."""
 
     def __init__(self, g: pd.DataFrame):
         self.unit_id = int(g["unit_id"].iloc[0]) if len(g) else None
@@ -131,6 +114,7 @@ class Track:
         self.last_move = np.maximum.accumulate(idx) if len(idx) else idx
 
     def at(self, T: np.ndarray) -> dict:
+        """Положение, скорость, возраст GPS и длительность стоянки на каждый момент из T."""
         n = len(self.t)
         T = np.asarray(T, float)
         if n == 0:
@@ -142,13 +126,13 @@ class Track:
         i = np.clip(end - 1, 0, n - 1)
 
         def mean_speed(win):
+            """Средняя скорость за win секунд до каждого момента из T."""
             st = np.searchsorted(self.t, T - win, side="right")
             cnt = end - st
             return np.where(cnt > 0, (self.cs[end] - self.cs[st]) / np.maximum(cnt, 1), np.nan)
 
         lm = self.last_move[i]
         first_still = np.clip(lm + 1, 0, n - 1)
-        # Наблюдаемая длительность простоя: разрыв связи простоем не считается.
         stationary = np.where(has & (lm != i), self.t[i] - self.t[first_still], 0.0)
         return {
             "lat": np.where(has, self.lat[i], np.nan),
@@ -161,7 +145,7 @@ class Track:
 
 
 class Plan:
-    """Плановые посещения остановок одним ТС, отсортированные по плановому времени."""
+    """Плановые посещения остановок одним ТС по возрастанию времени."""
 
     def __init__(self, g: pd.DataFrame):
         g = g.sort_values(["time_begin", "time_fact_begin"], kind="stable")
@@ -174,16 +158,17 @@ class Plan:
         self.pos = {int(v): k for k, v in enumerate(self.visit_id)}
 
     def last_passed(self, T):
+        """Индекс последнего посещения с плановым временем не позже T."""
         return np.searchsorted(self.plan, T, side="right") - 1
 
     def cur_dev(self, T):
-        """Как ``cur_dev_s`` организаторов: отклонение на последней остановке с планом <= T."""
+        """Отклонение на последней остановке с планом не позже T, как cur_dev_s у организаторов."""
         k = self.last_passed(T)
         d = np.where(k >= 0, self.dev[np.clip(k, 0, None)], 0.0)
         return np.nan_to_num(d, nan=0.0)
 
     def target(self, T):
-        """Индекс первой плановой остановки в окне (T+10, T+15] или -1."""
+        """Индекс первой остановки, до которой от 10 до 15 минут по плану, или -1."""
         j = np.searchsorted(self.plan, T + H_MIN, side="right")
         jj = np.clip(j, 0, len(self.plan) - 1)
         ok = (j < len(self.plan)) & (self.plan[jj] <= T + H_MAX)
@@ -191,12 +176,13 @@ class Plan:
 
 
 def parse_point(geom: str):
+    """Координаты из строки вида POINT (lon lat)."""
     lon, lat = geom.replace("POINT (", "").replace(")", "").split()
     return float(lat), float(lon)
 
 
 class Split:
-    """Одна часть датасета (train/test): треки, расписание, остановки."""
+    """Одна часть датасета (train или test): треки, расписание и остановки."""
 
     def __init__(self, data_dir: Path, name: str):
         self.name = name
@@ -216,7 +202,7 @@ class Split:
         self.speed_norm = {tr: self._speed_norm(tr) for tr in self.plans}
 
     def _speed_norm(self, tr) -> float:
-        """Норма маршрута: медиана средней 5-минутной скорости на линии (км/ч)."""
+        """Обычная скорость на маршруте: медиана средней скорости за 5 минут на линии."""
         tr_track = self.tracks.get(tr)
         p = self.plans[tr]
         if tr_track is None or len(tr_track.t) == 0:
@@ -227,6 +213,7 @@ class Split:
         return float(np.nanmedian(v)) if np.isfinite(v).any() else float("nan")
 
     def features(self, tr: int, T: np.ndarray, target_idx: np.ndarray, cur_dev=None) -> pd.DataFrame:
+        """Признаки ТС на момент T по данным не позже T."""
         T = np.asarray(T, float)
         p = self.plans[tr]
         tr_track = self.tracks.get(tr) or Track(self.traffic.iloc[0:0])
@@ -265,6 +252,7 @@ class Split:
         })
 
     def stop_name(self, i: int) -> str:
+        """Название остановки по ключу."""
         if self.stop_addr[i]:
             return self.stop_addr[i]
         d = haversine_m(self.stop_lat[i], self.stop_lon[i], self.stop_lat, self.stop_lon)
@@ -279,7 +267,7 @@ class Split:
 
 
 def label_features(split: Split, labels: pd.DataFrame) -> pd.DataFrame:
-    """Признаки для размеченных точек (train/test labels)."""
+    """Признаки для размеченных точек из labels."""
     parts = []
     labels = labels.copy()
     labels["Tn"] = naive_sec(labels["T"])
@@ -297,18 +285,16 @@ def label_features(split: Split, labels: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(parts)
 
 
-# ----------------------------------------------------------------------------- демо-модель
-
 class DemoModel:
-    """Лёгкая модель для прототипа: остаток к cur_dev_s + вероятность опоздания > 120 с.
+    """Простая модель для прототипа: поправка к текущему отклонению и вероятность опоздания.
 
-    Это не модель для сабмита — только чтобы дашборд показывал правдоподобные
-    прогнозы, пока не подключена модель команды (``--predictions``).
+    Не для сабмита, а чтобы дашборд показывал правдоподобные прогнозы без модели команды.
     """
 
     version = "demo-hgb-0.1"
 
     def fit(self, df: pd.DataFrame):
+        """Обучает модель на размеченных точках train."""
         from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 
         X = df[MODEL_FEATURES]
@@ -321,15 +307,15 @@ class DemoModel:
         return self
 
     def predict(self, df: pd.DataFrame):
+        """Прогноз задержки и вероятность опоздания больше 2 минут."""
         X = df[MODEL_FEATURES]
         pred = df["cur_dev_s"].to_numpy(float) + self.reg.predict(X)
         prob = self.clf.predict_proba(X)[:, 1]
         return pred, prob
 
 
-# ----------------------------------------------------------------------------- геометрия
-
 def decimate(path: list[tuple[float, float]], min_step_m=25.0):
+    """Прореживает линию, оставляя точки не ближе min_step метров друг к другу."""
     if len(path) <= 2:
         return path
     out = [path[0]]
@@ -341,7 +327,7 @@ def decimate(path: list[tuple[float, float]], min_step_m=25.0):
 
 
 def build_segments(split: Split, tr: int) -> list[dict]:
-    """Геометрия участков «остановка -> следующая остановка» по GPS между фактами прибытия."""
+    """Геометрия участков между соседними остановками по GPS между фактами прибытия."""
     p = split.plans[tr]
     tr_track = split.tracks.get(tr)
     cand: dict[tuple[int, int], list] = {}
@@ -365,7 +351,7 @@ def build_segments(split: Split, tr: int) -> list[dict]:
         length = haversine_m(lat[:-1], lon[:-1], lat[1:], lon[1:]).sum()
         straight = haversine_m(lat[0], lon[0], lat[-1], lon[-1]) + 1.0
         if length / straight > 2.5 and length - straight > 300:
-            continue  # петля/отстой — не годится как типичная геометрия
+            continue  # петля или отстой, для геометрии участка не годится
         cand[(a, b)].append((bool(p.manual[k] or p.manual[k + 1]), length, path))
     segs = []
     for (a, b), items in cand.items():
@@ -390,9 +376,8 @@ def short_name(name: str) -> str:
     return name.removeprefix("у ").split(", д.")[0]
 
 
-# ----------------------------------------------------------------------------- сборка
-
 def build(args):
+    """Собирает все данные для дашборда и примеры ответов backend."""
     t_start = time.time()
     data_dir = Path(args.data_dir).resolve()
     out_dir = Path(args.out).resolve()
@@ -405,7 +390,6 @@ def build(args):
     labels_path = data_dir / "labels" / f"labels_{args.split}.csv"
     labels = pd.read_csv(labels_path) if labels_path.exists() else None
 
-    # --- прогнозные точки на сетке, как у онлайн-backend
     print("[2/6] Прогнозные точки на сетке", args.grid_step, "с")
     rows = []
     for tr, p in split.plans.items():
@@ -435,7 +419,6 @@ def build(args):
     points.to_csv(out_dir / "points_grid.csv", index=False)
     print(f"      {len(grid)} точек, {grid.tr_id.nunique()} ТС -> {out_dir / 'points_grid.csv'}")
 
-    # --- модель
     print("[3/6] Прогноз")
     model_info = {}
     if args.predictions:
@@ -477,7 +460,6 @@ def build(args):
                   f"cur_dev {model_info['mae_cur_dev']} с, ноль {model_info['mae_zero']} с")
     model_info["latency_ms_single"] = round(latency_ms, 2) if latency_ms else None
 
-    # --- статус и fallback
     stale = grid["gps_age_s"].isna() | (grid["gps_age_s"] > FALLBACK_GPS_AGE_S) | grid["pred"].isna()
     grid["status"] = np.where(stale, "fallback", "model")
     grid.loc[stale, "pred"] = grid.loc[stale, "cur_dev_s"]
@@ -489,13 +471,11 @@ def build(args):
     grid["detail"] = [d[1] for d in diag]
     grid["labelled"] = grid["sample_id"].isin(set(labels["sample_id"])) if labels is not None else False
     grid = grid.sort_values(["tr_id", "Tn"]).reset_index(drop=True)
-    # Участок начинается с последней остановки, до которой ТС реально доехало к T (факт <= T),
-    # а не с последней по плану: опаздывающий автобус до «плановой» остановки ещё не доехал.
+    # участок начинаем с остановки, до которой ТС реально доехало к T, а не с последней по плану
     reached = {tr: np.fmax.accumulate(np.nan_to_num(p.fact, nan=-np.inf)) for tr, p in split.plans.items()}
     grid["from_idx"] = [max(0, int(np.searchsorted(reached[tr], T, side="right")) - 1)
                         for tr, T in zip(grid["tr_id"], grid["Tn"])]
 
-    # --- инциденты: эпизоды риска по ТС
     print("[4/6] Инциденты")
     incidents = []
     for tr, g in grid.groupby("tr_id", sort=False):
@@ -512,7 +492,7 @@ def build(args):
                 if cur and cur["kind"] != kind:
                     cur["closed_at"] = t
                     cur = None
-                # Антидребезг: «красный» открывает инцидент сразу, остальное — со второго прогноза подряд.
+                # красный открывает инцидент сразу, остальное со второго прогноза подряд
                 if cur is None and (sev == "critical" or prev_kind == kind):
                     cur = {"tr_id": int(tr), "kind": kind, "opened_at": t, "closed_at": None, "preds": []}
                     incidents.append(cur)
@@ -534,7 +514,7 @@ def build(args):
     print(f"      {len(incidents)} инцидентов")
 
     if args.start == "auto":
-        # Старт воспроизведения — незадолго до момента с наибольшим числом активных опозданий.
+        # стартуем незадолго до момента, когда опозданий больше всего, так нагляднее
         best_t, best_n = None, -1
         for t in np.arange(grid["Tn"].min() + 3600, grid["Tn"].max() - 3600, 300):
             n = sum(i["kind"] == "late" and i["opened_at"] <= t < i["closed_at"] for i in incidents)
@@ -545,7 +525,6 @@ def build(args):
     else:
         start_naive = naive_sec([args.start])[0]
 
-    # --- сеть маршрутов
     print("[5/6] Маршрутная сеть и телеметрия")
     used_stops = sorted({int(s) for p in split.plans.values() for s in p.stop})
     stop_names = {i: split.stop_name(i) for i in used_stops}
@@ -564,7 +543,6 @@ def build(args):
         })
     routes.sort(key=lambda r: r["tr_id"])
 
-    # --- телеметрия (все ТС, в т.ч. без расписания)
     t0_epoch = to_epoch(split.traffic["t"].min())
     telemetry = {}
     for tr, tk in split.tracks.items():
@@ -594,7 +572,7 @@ def build(args):
             "fact": [to_epoch(v) if np.isfinite(v) else None for v in p.fact],
         }
 
-    # --- прогнозы (колоночно, чтобы файл был компактным)
+    # прогнозы пишем по колонкам, так файл заметно меньше
     pred_cols = ["as_of", "tr_id", "target_stop_id", "target_time_begin", "from_stop_id", "prediction_delay_s",
                  "late_probability", "cur_dev_s", "status", "outcome_delay_s", "outcome_at", "speed_5m_kmh",
                  "speed_norm_kmh", "stationary_s", "near_stop_m", "gps_age_s", "dev_trend_15m_s",
@@ -641,7 +619,6 @@ def build(args):
                        "closed_at": to_epoch(i["closed_at"]) if i["closed_at"] is not None else None,
                        "preds": i["preds"]} for i in incidents],
     }
-    # Справочник сети для backend: остановки и геометрия маршрутов (без фактов расписания).
     network = {"stops": [{"stop_key": s[0], "lat": s[1], "lon": s[2], "name": s[3]} for s in replay["stops"]],
                "routes": routes}
     (out_dir / "network.json").write_text(json.dumps(network, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
@@ -649,23 +626,20 @@ def build(args):
     (out_dir / "replay.js").write_text("window.REPLAY_DATA=" + text + ";\n", encoding="utf-8")
     print(f"      replay.js: {len(text) / 1e6:.1f} МБ")
 
-    # --- примеры ответов backend по контракту
     print("[6/6] Примеры контракта ->", contract_dir)
     example = start_naive + 900 if args.example_time == "auto" else naive_sec([args.example_time])[0]
     write_contract_examples(contract_dir, replay, to_epoch(example))
     print(f"Готово за {time.time() - t_start:.0f} с")
 
 
-# ----------------------------------------------------------------------------- контракт
-
 def prediction_obj(replay: dict, i: int) -> dict:
-    """Строка колоночного формата -> объект Prediction по контракту."""
+    """Прогноз из колоночного формата в объект Prediction из контракта."""
     cols = replay["predictions"]["columns"]
     r = dict(zip(cols, replay["predictions"]["rows"][i]))
     feats = {s["feature"]: r.get(s["feature"]) for s in EVIDENCE_SPEC}
     feats["speed_norm_kmh"] = r["speed_norm_kmh"]
     sev = severity_of(r["prediction_delay_s"])
-    code = r["reason"]  # причина уже определена при выпуске прогноза (diagnose)
+    code = r["reason"]
     stops = {s[0]: s[3] for s in replay["stops"]}
     v = replay["visits"][str(r["tr_id"])]
     pos = {vid: k for k, vid in enumerate(v["id"])}
@@ -700,7 +674,7 @@ def prediction_obj(replay: dict, i: int) -> dict:
 
 
 def snapshot(replay: dict, now: int) -> dict:
-    """Состояние системы на момент ``now`` (epoch) — то, что backend отдаёт по API."""
+    """Состояние системы на момент now в том же виде, что отдаёт backend."""
     meta = replay["meta"]
     cols = replay["predictions"]["columns"]
     rows = replay["predictions"]["rows"]
@@ -783,6 +757,7 @@ def snapshot(replay: dict, now: int) -> dict:
 
 
 def write_contract_examples(contract_dir: Path, replay: dict, now: int):
+    """Пишет примеры ответов backend в contract/examples."""
     snap = snapshot(replay, now)
     network = {
         "stops": [{"stop_key": s[0], "lat": s[1], "lon": s[2], "name": s[3]} for s in replay["stops"][:5]],
@@ -796,7 +771,6 @@ def write_contract_examples(contract_dir: Path, replay: dict, now: int):
         {"visit_id": v["id"][k], "stop_key": v["stop"][k], "time_plan": iso_msk(v["plan"][k]),
          "time_fact": iso_msk(v["fact"][k]) if v["fact"][k] and v["fact"][k] <= now else None}
         for k in range(min(6, len(v["id"])))]}
-    # В примеры — самое показательное: активные инциденты и прогнозы с риском.
     preds = sorted(snap["predictions"], key=lambda p: -SEVERITY_ORDER[p["severity"]])
     incs = sorted(snap["incidents"], key=lambda i: (i["status"] != "active", -SEVERITY_ORDER[i["severity"]]))
     vehs = sorted(snap["vehicles"], key=lambda v: -SEVERITY_ORDER[v["severity"]])
@@ -807,6 +781,7 @@ def write_contract_examples(contract_dir: Path, replay: dict, now: int):
 
 
 def main():
+    """Разбирает аргументы и запускает сборку."""
     here = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", default=os.environ.get("DATA_DIR", str(here.parents[2] / "dataset")),

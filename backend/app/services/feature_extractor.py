@@ -1,10 +1,7 @@
-"""Состояние ТС и признаки на момент прогноза T (строго по данным с event_time <= T).
+"""Состояние ТС и признаки для модели на момент прогноза T.
 
-* ``VehicleTrack`` — последние ~20 минут валидных GPS-отметок ТС.
-* ``ArrivalTracker`` — детектор прибытий: идёт по плановым посещениям ТС и фиксирует
-  прибытие, когда ТС входит в геозону следующей остановки. Отклонение прибытия от плана —
-  онлайн-оценка текущего отклонения (``cur_dev_s``), которого в NDTP нет.
-* ``FeatureExtractor`` — принимает записи телеметрии и собирает ``MLFeaturesPayload``.
+Всё считается только по отметкам, пришедшим не позже T. Текущего отклонения от графика
+в NDTP нет, его оценивает детектор прибытий по GPS.
 """
 
 from __future__ import annotations
@@ -24,35 +21,37 @@ MOVING_KMH = 3.0
 
 
 class VehicleTrack:
+    """Последние минуты GPS-трека одного ТС."""
     def __init__(self, unit_id: int | None = None):
         self.unit_id = unit_id
         self.points: deque = deque()  # (t, lat, lon, speed, heading)
-        self.last_event_t: float | None = (
-            None  # последняя запись, даже без валидных координат
-        )
+        self.last_event_t: float | None = None  # считаем и пакеты без координат
 
     def add(self, t: float, lat, lon, speed, heading, valid: bool) -> bool:
+        """Добавляет точку, возвращает False для точки без координат, дубля или опоздавшей."""
         self.last_event_t = (
             t if self.last_event_t is None else max(self.last_event_t, t)
         )
         if not valid or lat is None or lon is None:
             return False
         if self.points and t <= self.points[-1][0]:
-            return False  # дубли и опоздавшие пакеты не переписывают прошлое
+            return False  # дубль или опоздавший пакет
         self.points.append((t, lat, lon, float(speed or 0.0), float(heading or 0.0)))
         while self.points and self.points[0][0] < t - HISTORY_SEC:
             self.points.popleft()
         return True
 
     def last(self):
+        """Последняя точка трека или None."""
         return self.points[-1] if self.points else None
 
     def mean_speed(self, t: float, window: float) -> float | None:
+        """Средняя скорость за окно window секунд до момента t."""
         v = [p[3] for p in self.points if t - window < p[0] <= t]
         return sum(v) / len(v) if v else None
 
     def stationary(self, t: float) -> float:
-        """Наблюдаемая длительность текущего простоя; разрыв связи простоем не считается."""
+        """Сколько секунд ТС стоит на месте к моменту t, пропуск связи стоянкой не считается."""
         pts = [p for p in self.points if p[0] <= t]
         if not pts or pts[-1][3] >= MOVING_KMH:
             return 0.0
@@ -66,36 +65,35 @@ class VehicleTrack:
 
 @dataclass
 class Arrival:
-    idx: int  # индекс планового посещения
-    t: float  # время прибытия по детектору
-    dev: float  # t - plan
+    """Прибытие на плановое посещение: индекс, время и отклонение от плана в секундах."""
+    idx: int
+    t: float
+    dev: float
 
 
 class ArrivalTracker:
-    """Причинный детектор прибытий по порядку плановых посещений.
+    """Детектор прибытий по GPS.
 
-    Прибытие засчитывается, когда ТС входит в геозону остановки одного из ближайших
-    плановых посещений, чьё плановое время в окне [t - LATE, t + EARLY] (ТС может прийти
-    раньше плана до 7 мин и опоздать до 13 мин); из нескольких кандидатов берётся ближайший
-    по времени (защита от встречной платформы и следующего круга). На test против факта:
-    медиана ошибки 6 с, MAE 22 с.
+    Идём по плановым посещениям ТС и засчитываем прибытие, когда автобус въезжает в зону
+    остановки, а время укладывается в окно от 7 минут раньше плана до 13 минут позже.
+    Из нескольких подходящих посещений берём ближайшее по времени. На test ошибка против
+    факта около 22 секунд.
     """
 
-    LOOKAHEAD = 6  # сколько следующих посещений проверять (пропуски, близкие остановки)
+    LOOKAHEAD = 6  # смотрим на несколько посещений вперёд: остановки бывают пропущены
 
     def __init__(self, plan: VehiclePlan):
         self.plan = plan
         self.k: int | None = None
         self.arrivals: list[Arrival] = []
-        self.inside: int | None = None  # в геозоне какого посещения ТС сейчас
+        self.inside: int | None = None
 
     def update(self, t: float, lat: float, lon: float) -> Arrival | None:
+        """Обрабатывает новую точку, возвращает прибытие, если оно случилось."""
         p = self.plan
         n = len(p.plan)
         early, late = settings.ARRIVAL_EARLY_SEC, settings.ARRIVAL_LATE_SEC
-        if (
-            self.k is None
-        ):  # первое наблюдение (или старт посреди дня) — ищем от текущего времени
+        if self.k is None:  # первая точка, возможно посреди дня
             self.k = int(np.searchsorted(p.plan, t - late))
         while self.k < n and p.plan[self.k] < t - late:
             self.k += 1
@@ -118,8 +116,8 @@ class ArrivalTracker:
                 self.inside = None
             return None
         j = min(cands, key=lambda c: abs(t - p.plan[c]))
-        # Повторное посещение той же остановки (отстой на конечной): засчитываем не раньше
-        # чем за минуту до плана, пока ТС стоит в геозоне.
+        # на конечной одна остановка идёт дважды подряд: пока ТС стоит в зоне,
+        # второе прибытие засчитываем не раньше чем за минуту до плана
         if (
             j > 0
             and p.stop[j] == p.stop[j - 1]
@@ -134,6 +132,7 @@ class ArrivalTracker:
         return a
 
     def last_before(self, t: float) -> Arrival | None:
+        """Последнее прибытие не позже момента t."""
         for a in reversed(self.arrivals):
             if a.t <= t:
                 return a
@@ -141,17 +140,19 @@ class ArrivalTracker:
 
 
 class FeatureExtractor:
+    """Держит треки и детекторы прибытий по всем ТС и собирает признаки для модели."""
     def __init__(self, network: NetworkStore):
         self.network = network
         self.tracks: dict[str, VehicleTrack] = {}
         self.trackers: dict[str, ArrivalTracker] = {}
 
     def reset(self) -> None:
+        """Забывает все треки и прибытия."""
         self.tracks.clear()
         self.trackers.clear()
 
     def ingest(self, rec: RawNDTPRecord) -> Arrival | None:
-        """Обновить состояние ТС; вернуть новое прибытие, если детектор его зафиксировал."""
+        """Добавляет точку телеметрии и возвращает прибытие, если детектор его засёк."""
         tr = rec.tr_id
         track = self.tracks.get(tr)
         if track is None:
@@ -170,7 +171,10 @@ class FeatureExtractor:
     def extract_features(
         self, tr: str, t: float
     ) -> tuple[MLFeaturesPayload, dict] | None:
-        """Признаки на момент T и служебный контекст (индексы посещений) или None, если цели нет."""
+        """Признаки на момент T и индексы посещений для ответа API.
+
+        Возвращает None, если у ТС нет остановки в окне 10-15 минут.
+        """
         plan = self.network.plans.get(tr)
         track = self.tracks.get(tr)
         if plan is None or track is None:
@@ -206,12 +210,10 @@ class FeatureExtractor:
         v5 = track.mean_speed(t, 300)
         hour = ((t + settings.TZ_OFFSET_HOURS * 3600) % 86400) / 3600
         from_idx = arr.idx if arr else max(plan.last_planned(t), 0)
-        # Начало участка для дашборда — последнее прибытие по детектору. Если прибытий ещё нет, берём
-        # остановку, плановое время которой прошло больше 5 мин назад: по одному плану опаздывающий
-        # автобус оказался бы «проехавшим» остановку, до которой ещё не доехал. Признаки модели
-        # считаются от from_idx, как при обучении.
+        # Начало участка для карты. Пока прибытий нет, берём остановку, план которой прошёл
+        # больше 5 минут назад, иначе опаздывающий автобус выглядит проехавшим её.
+        # Признаки модели по-прежнему считаются от from_idx.
         seg_from = arr.idx if arr else max(plan.last_planned(t - 300), 0)
-        # Признаки модели, отсутствующие в исходном payload.
         minute = (t + settings.TZ_OFFSET_HOURS * 3600) % 86400 / 60
         cur = float(cur_dev) if cur_dev is not None else 0.0
         prev = None
@@ -284,7 +286,7 @@ class FeatureExtractor:
 
 
 def rule_features(f: MLFeaturesPayload) -> dict:
-    """Признаки в именах incident_rules (для причины и доказательств в карточке)."""
+    """Признаки в тех именах, которые ждут правила причин в incident_rules."""
     return {
         "cur_dev_s": f.current_delay_sec if f.current_delay_known else None,
         "dev_trend_15m_s": f.delay_trend_15m_s,
@@ -298,4 +300,5 @@ def rule_features(f: MLFeaturesPayload) -> dict:
 
 
 def finite(x):
+    """Число, если оно конечное, иначе None."""
     return None if x is None or (isinstance(x, float) and not math.isfinite(x)) else x

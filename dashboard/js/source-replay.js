@@ -1,6 +1,6 @@
-/* Источник данных REPLAY: воспроизведение дня из data/replay.js (финализируется map_matching).
-   Отдаёт те же объекты, что backend по контракту (CONTRACT.md), только времена — epoch-секунды.
-   Всё, что показывается на момент now, вычисляется только из данных с временем <= now. */
+/* Источник данных без backend: проигрывает день из data/replay.js прямо в браузере.
+   Отдаёт те же объекты, что и API, только время в секундах Unix. На момент now видно
+   только то, что к этому времени уже произошло. */
 (function () {
   'use strict';
 
@@ -49,7 +49,6 @@
         b.asof.push(r[c.as_of]);
       });
 
-      // Проверка прогнозов: исход становится известен, когда наступил факт прибытия.
       const rev = [];
       rows.forEach((r, i) => {
         if (r[c.outcome_at] == null || r[c.outcome_delay_s] == null) return;
@@ -64,19 +63,16 @@
         this.cumErr.push(this.cumErr[this.cumErr.length - 1] + Math.abs(r[c.prediction_delay_s] - r[c.outcome_delay_s]));
         this.cumBase.push(this.cumBase[this.cumBase.length - 1] + Math.abs(r[c.cur_dev_s] - r[c.outcome_delay_s]));
       }
-      // Журнал проверки — на 5-минутной сетке, как у организаторов.
       const ver = rev.filter(([, i]) => rows[i][c.as_of] % 300 === 0);
       this.verT = ver.map((x) => x[0]);
       this.verI = ver.map((x) => x[1]);
 
       this.incidents = data.incidents.map((inc) => ({ ...inc, asof: inc.preds.map((i) => rows[i][c.as_of]) }));
 
-      // Журнал прогнозов по времени выпуска (для «Аналитики» и «Журнала»).
       this.logI = rows.map((r, i) => i).sort((a, b) => rows[a][c.as_of] - rows[b][c.as_of]);
       this.logT = this.logI.map((i) => rows[i][c.as_of]);
       this.recCache = new Map();
 
-      // Картина дня: каждые 5 мин — число маршрутов по уровню риска и поток отметок.
       const step = 300;
       const t0 = Math.floor(m.day_start / step) * step;
       const nb = Math.ceil((m.day_end - t0) / step) + 1;
@@ -97,12 +93,12 @@
           if (b >= 0 && b < nb) day.packets[b]++;
         }
       }
-      // Телеметрия в replay прорежена до 10 с — пересчёт в отметки/мин за 5-минутное окно.
+      // в replay.js телеметрия прорежена, пересчитываем в отметки в минуту
       day.packets = day.packets.map((x) => x / 5);
       this.day = day;
     }
 
-    /** Строка прогноза -> запись журнала (факт виден потребителю, только если outcome_at <= now). */
+    /** Запись журнала по строке прогноза. */
     rec(i) {
       let r = this.recCache.get(i);
       if (r) return r;
@@ -122,7 +118,7 @@
       return r;
     }
 
-    /** Все прогнозы, выпущенные к dataNow (по времени выпуска). */
+    /** Все прогнозы, выпущенные к моменту dataNow. */
     predictionRecords(now, dataNow) {
       const n = U.countLE(this.logT, dataNow != null ? dataNow : now);
       const out = new Array(n);
@@ -130,7 +126,7 @@
       return out;
     }
 
-    /** История инцидентов, открытых к dataNow. */
+    /** Инциденты, открытые к моменту dataNow. */
     incidentRecords(now, dataNow) {
       const t = dataNow != null ? dataNow : now;
       const c = this.c, rows = this.rows;
@@ -158,7 +154,7 @@
       return out;
     }
 
-    /** Картина дня до момента now: t, число маршрутов по уровню риска, отметок/мин. */
+    /** Картина дня до момента now: сколько маршрутов на каждом уровне риска и поток отметок. */
     dayHistory(now, dataNow) {
       const n = U.countLE(this.day.t, dataNow != null ? dataNow : now);
       const d = this.day, sl = (a) => a.slice(0, n);
@@ -170,7 +166,7 @@
 
     schedule(tr) { return this.visits.get(tr) || null; }
 
-    /** Строка прогноза -> объект Prediction контракта. */
+    /** Прогноз в том же виде, что отдаёт backend. */
     pred(i, now) {
       const c = this.c, r = this.rows[i], m = this.meta;
       const tr = r[c.tr_id];
@@ -220,7 +216,7 @@
       };
     }
 
-    /** Состояние на now. linkDownSince — момент имитированного обрыва связи (или null). */
+    /** Состояние на момент now. linkDownSince задаёт начало имитированного обрыва связи. */
     snapshot(now, linkDownSince) {
       const down = linkDownSince != null && now > linkDownSince;
       const dataNow = down ? linkDownSince : now;
@@ -247,7 +243,7 @@
         packets += k + 1 - U.countLE(T.t, dataNow - 60);
         lastPacket = Math.max(lastPacket || 0, T.t[k]);
         const route = this.network.routeByTr.get(tr);
-        if (!route) continue; // hide telemetry without a planned/catalogued route
+        if (!route) continue;
         let pos = k;
         if (T.mm && !T.mm[k]) {
           pos = T.lastMm[k];

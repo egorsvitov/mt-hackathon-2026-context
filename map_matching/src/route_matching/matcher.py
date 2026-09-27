@@ -44,6 +44,7 @@ class Frame:
 
 
 def _history_order(e: Event):
+    """Sort key for the per-vehicle event history."""
     return (e.event_time, e.available_time, e.packet_id)
 
 
@@ -399,11 +400,10 @@ class Matcher:
         history = self._history[event.tr_id]
         order = _history_order
         if history and order(event) < order(history[-1]):
-            bisect.insort(history, event, key=order)  # опоздавший пакет — на своё место
+            bisect.insort(history, event, key=order)  # late packet
         else:
             history.append(event)
-        # Пересборке после опоздавшего пакета нужно только последнее окно: старое не храним,
-        # иначе история растёт весь день. Чистим пачками, а не на каждой отметке.
+        # a late packet only replays the last window, so older events can go (trimmed in batches)
         cutoff = history[-1].event_time - self.config.window_s
         if history[0].event_time < cutoff - self.config.window_s:
             del history[: bisect.bisect_left(history, cutoff, key=lambda e: e.event_time)]

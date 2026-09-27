@@ -4,6 +4,7 @@ from datetime import datetime
 
 @dataclass(frozen=True)
 class NplHeader:
+    """Заголовок транспортного уровня NPL."""
     data_size: int
     crc: int
     packet_type: int
@@ -13,6 +14,7 @@ class NplHeader:
 
 @dataclass(frozen=True)
 class NphHeader:
+    """Заголовок сервисного уровня NPH."""
     service_id: int
     message_type: int
     request_id: int
@@ -20,6 +22,7 @@ class NphHeader:
 
 @dataclass(frozen=True)
 class Telemetry:
+    """Навигационные данные из ячейки G6CellNav00."""
     unit_id: int
     event_time: datetime
     receive_time: datetime

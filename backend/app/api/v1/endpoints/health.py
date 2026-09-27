@@ -9,6 +9,7 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
+    """Короткий ответ, что backend работает."""
     return {"status": "ok", "service": "backend"}
 
 
@@ -20,7 +21,7 @@ async def health_live():
 
 @router.get("/health/ready")
 async def health_ready():
-    """Готов к работе: справочные данные загружены. ML может быть недоступен — тогда fallback."""
+    """Справочные данные загружены и можно работать. Если ML недоступен, прогнозы идут без модели."""
     net = pipeline.network
     body = {
         "status": "ready" if net.loaded else "not_ready",

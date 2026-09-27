@@ -1,9 +1,4 @@
-"""Инциденты — эпизоды риска по ТС (а не карточка на каждый прогноз).
-
-* ``critical`` открывает инцидент сразу, ``warning``/``early`` — со второго прогноза подряд.
-* Инцидент закрывается после ``COOLDOWN`` прогнозов подряд без риска.
-* Причина и рекомендация берутся из последнего прогноза с риском.
-"""
+"""Инциденты: эпизоды риска по ТС, а не отдельная карточка на каждый прогноз."""
 
 from __future__ import annotations
 
@@ -18,6 +13,7 @@ KEEP_RESOLVED_SEC = 900
 
 @dataclass
 class Episode:
+    """Один инцидент по ТС: от первой тревоги до закрытия."""
     incident_id: str
     tr_id: str
     kind: str
@@ -31,18 +27,24 @@ class Episode:
 
 
 class IncidentTracker:
+    """Превращает поток прогнозов в инциденты, чтобы не заводить карточку на каждый прогноз."""
     def __init__(self):
         self.active: dict[str, Episode] = {}
         self.resolved: list[Episode] = []
         self.prev_kind: dict[str, str | None] = {}
 
     def reset(self) -> None:
+        """Удаляет все инциденты."""
         self.active.clear()
         self.resolved.clear()
         self.prev_kind.clear()
 
     def update(self, tr: str, pred: dict) -> None:
-        """pred — прогноз во внутреннем виде (времена — epoch)."""
+        """Учитывает новый прогноз по ТС: открывает, обновляет или закрывает инцидент.
+
+        Опоздание больше 2 минут открывает инцидент сразу, риск и опережение со второго прогноза
+        подряд. Закрываем после нескольких спокойных прогнозов подряд.
+        """
         sev = pred["severity"]
         kind = ALERT_KINDS.get(sev)
         ep = self.active.get(tr)
@@ -74,23 +76,25 @@ class IncidentTracker:
         self.prev_kind[tr] = kind
 
     def drop(self, tr: str, t: float) -> None:
-        """ТС ушло с линии — закрыть его инцидент."""
+        """ТС ушло с линии, закрываем его инцидент."""
         ep = self.active.get(tr)
         if ep:
             self._close(ep, t)
 
     def _close(self, ep: Episode, t: float) -> None:
+        """Закрывает инцидент и переносит его в недавно закрытые."""
         ep.closed_at = t
         self.active.pop(ep.tr_id, None)
         self.resolved.append(ep)
 
     def set_outcome(self, tr: str, target_stop_id: int, outcome: float) -> None:
-        """Исход (факт) для цели, по которой шла тревога — для строки «прогноз → факт»."""
+        """Запоминает фактическое отклонение по остановке, о которой была тревога."""
         for ep in list(self.active.values()) + self.resolved[-50:]:
             if ep.tr_id == tr and ep.alert["target_stop_id"] == target_stop_id:
                 ep.outcome_delay_s = outcome
 
     def visible(self, now: float) -> list[Episode]:
+        """Активные инциденты и закрытые за последние 15 минут."""
         self.resolved = [
             e for e in self.resolved if e.closed_at > now - KEEP_RESOLVED_SEC
         ]

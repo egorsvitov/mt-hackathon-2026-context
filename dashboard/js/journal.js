@@ -1,5 +1,4 @@
-/* Экран «Журнал»: все прогнозы (с фактом и ошибкой), история инцидентов, события системы.
-   Фильтры, выгрузка в CSV, клик по строке открывает ТС на диспетчерской. */
+/* Экран «Журнал»: прогнозы с фактом и ошибкой, инциденты и события системы, выгрузка в CSV. */
 (function () {
   'use strict';
 
@@ -7,7 +6,7 @@
   const LIMIT = 300;
   const st = { tab: 'predictions', rows: [], csv: null };
 
-  /** epoch -> «2026-01-06 08:33:00» по Москве (для CSV). */
+  /** Время по Москве в виде 2026-01-06 08:33:00 для CSV. */
   const stamp = (t) => (t == null ? '' : new Date((t + 10800) * 1000).toISOString().slice(0, 19).replace('T', ' '));
 
   function init(App) {
@@ -37,7 +36,7 @@
       const s = v == null ? '' : String(v);
       return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    // BOM и «;» — чтобы Excel открыл кириллицу и колонки без настроек.
+    // BOM и точка с запятой, чтобы Excel сразу понял кириллицу и колонки
     const csv = '﻿' + rows.map((r) => r.map(esc).join(';')).join('\r\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));

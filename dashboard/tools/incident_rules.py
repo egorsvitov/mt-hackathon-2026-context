@@ -1,7 +1,6 @@
-"""Правила риска, причин и рекомендаций живут в backend: backend/app/services/incident_rules.py.
+"""Правила риска и причин живут в backend/app/services/incident_rules.py.
 
-Этот модуль — прокладка для инструментов дашборда (build_fixtures, mock_backend), чтобы
-REPLAY и backend использовали одни и те же правила.
+Здесь только импорт оттуда, чтобы инструменты дашборда и backend считали одинаково.
 """
 
 import sys

@@ -1,4 +1,4 @@
-"""API диспетчерского дашборда (контракт: dashboard/CONTRACT.md)."""
+"""API диспетчерского дашборда. Формат ответов описан в dashboard/CONTRACT.md."""
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -20,13 +20,13 @@ router = APIRouter()
     "/network", response_model=Network, response_model_by_alias=True, tags=["dashboard"]
 )
 async def get_network():
-    """Остановки и геометрия маршрутов (маршрут = нитка ТС). Загружается дашбордом один раз."""
+    """Остановки и геометрия маршрутов. Дашборд загружает их один раз при старте."""
     return pipeline.network.network_payload()
 
 
 @router.get("/schedule", response_model=Schedule, tags=["dashboard"])
 async def get_schedule(tr_id: str = Query(..., description="ID ТС")):
-    """Плановые посещения ТС; `time_fact` — прибытия, уже зафиксированные детектором."""
+    """Плановые посещения ТС. В time_fact прибытия, которые уже засёк детектор."""
     out = pipeline.schedule_out(tr_id)
     if out is None:
         raise HTTPException(404, f"Нет расписания для ТС {tr_id}")
@@ -35,13 +35,13 @@ async def get_schedule(tr_id: str = Query(..., description="ID ТС")):
 
 @router.get("/vehicles", response_model=list[Vehicle], tags=["dashboard"])
 async def get_vehicles():
-    """Последнее положение ТС и свежесть данных."""
+    """Последнее положение каждого ТС и возраст данных."""
     return pipeline.vehicles_out()
 
 
 @router.get("/predictions", response_model=list[Prediction], tags=["dashboard"])
 async def get_predictions():
-    """Последний прогноз по каждому ТС на линии: цель в окне T+10…15 мин, риск, причина."""
+    """Последний прогноз по каждому ТС на линии: остановка через 10-15 минут, риск и причина."""
     return pipeline.predictions_out()
 
 
@@ -49,22 +49,22 @@ async def get_predictions():
 async def get_verified(
     limit: int = Query(80, ge=1, le=20000),
     all: bool = Query(
-        False, description="true — все прогнозы, иначе только 5-минутная сетка"
+        False, description="true: все прогнозы, иначе только сетка 5 минут"
     ),
 ):
-    """Прогнозы, сверенные с фактом прибытия (replay), новые сверху."""
+    """Прогнозы, сверенные с фактом прибытия, новые первыми."""
     return pipeline.verified_out(limit, all)
 
 
 @router.get("/metrics", response_model=Metrics, tags=["dashboard"])
 async def get_metrics():
-    """Состояние потока, задержка инференса, точность прогнозов по факту."""
+    """Состояние потока, задержка обработки и точность прогнозов по факту."""
     return pipeline.metrics_out()
 
 
 @router.get("/config", response_model=Config, tags=["dashboard"])
 async def get_config():
-    """Пороги уровня риска, горизонт, версия и статус модели."""
+    """Пороги уровня риска, горизонт прогноза, версия и статус модели."""
     return pipeline.config_out()
 
 
@@ -73,7 +73,7 @@ async def demo_start(
     speed: float = Query(1.0, ge=0, le=600),
     t: str | None = Query(None, description="Время старта, ЧЧ:ММ"),
 ):
-    """Запустить воспроизведение исторического дня из CSV (заново, с указанного времени)."""
+    """Запускает воспроизведение исторического дня заново с указанного времени."""
     replay = pipeline.replay
     await replay.start(speed, t)
     return {
@@ -84,8 +84,8 @@ async def demo_start(
 
 
 @router.post("/demo/speed", tags=["demo"])
-async def demo_speed(speed: float = Query(..., ge=0, le=600, description="0 — пауза")):
-    """Скорость воспроизведения без сброса состояния."""
+async def demo_speed(speed: float = Query(..., ge=0, le=600, description="0 ставит на паузу")):
+    """Меняет скорость воспроизведения, состояние не сбрасывается."""
     if not pipeline.replay.active:
         raise HTTPException(409, "Воспроизведение не запущено")
     pipeline.replay.set_speed(speed)
@@ -94,7 +94,7 @@ async def demo_speed(speed: float = Query(..., ge=0, le=600, description="0 — 
 
 @router.post("/demo/stop", tags=["demo"])
 async def demo_stop():
-    """Остановить воспроизведение: поток прекращается, дашборд переходит в деградацию."""
+    """Останавливает воспроизведение. Часы замирают, дашборд показывает последнее состояние как устаревшее."""
     await pipeline.replay.stop()
     return {"status": "stopped"}
 
@@ -102,9 +102,9 @@ async def demo_stop():
 @router.post("/demo/link", tags=["demo"])
 async def demo_link(
     down: bool = Query(
-        ..., description="true — имитировать обрыв потока, false — восстановить"
+        ..., description="true имитирует обрыв потока, false восстанавливает"
     ),
 ):
-    """Имитация обрыва связи с источником телеметрии (часы идут, пакеты не приходят)."""
+    """Имитирует обрыв связи с источником телеметрии: часы идут, а точки не приходят."""
     pipeline.replay.set_link(down)
     return {"ingest_status": pipeline.ingest_status()}
