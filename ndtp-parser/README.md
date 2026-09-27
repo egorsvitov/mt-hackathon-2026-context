@@ -14,13 +14,17 @@ CRC-16/Modbus, несколько одновременных соединени�
 python3 ndtp-parser/main.py
 ```
 
-Сервер слушает `0.0.0.0:9201`. Эмулятор можно настроить так:
+Сервер слушает `0.0.0.0:9201`; в `docker compose` он опубликован на порту **19201**.
+
+Эмулятор организаторов проще запустить в той же сети compose (API эмулятора — порт 18080):
 
 ```bash
+docker load -i <датасет>/ndtp-telemetry-emulator.tar
+docker compose --profile emulator up -d
 curl -s -X POST http://localhost:18080/api/config \
   -H 'Content-Type: application/json' \
   -d '{
-    "targetHost": "host.docker.internal",
+    "targetHost": "ndtp-parser",
     "targetPort": 9201,
     "units": [
       {"unitId": 893159, "intervalMs": 5000, "autoGenerate": true, "cells": []},
@@ -29,6 +33,13 @@ curl -s -X POST http://localhost:18080/api/config \
     ]
   }'
 ```
+
+Если эмулятор запущен отдельно (`docker run -p 18080:18080 --add-host=host.docker.internal:host-gateway …`),
+в конфиге укажите `"targetHost": "host.docker.internal"` и `"targetPort": 19201`.
+
+Эмулятор шлёт случайные точки с текущей датой. Пока backend воспроизводит исторический день из CSV,
+такие отметки отбрасываются как «из будущего» — иначе ТС с теми же `unit_id` (в примере выше это
+ТС 122048, 122613, 122658) застыли бы на карте.
 
 ## Структура
 

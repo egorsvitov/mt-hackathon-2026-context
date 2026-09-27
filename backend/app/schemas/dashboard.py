@@ -190,6 +190,9 @@ class Metrics(BaseModel):
     inference_latency_ms_p95: float | None = None
     queue_lag_s: float = 0.0
     reconnects: int = 0
+    rejected_future: int = Field(
+        0, description="Отброшено отметок новее часов системы больше чем на MAX_FUTURE_SKEW_SEC"
+    )
     mae_live_s: float | None = None
     mae_baseline_live_s: float | None = None
     n_verified: int = 0

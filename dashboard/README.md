@@ -36,7 +36,7 @@ python dashboard/tools/fetch_basemap.py                          # подлож�
 DATA_DIR=../data/dataset docker compose up --build                    # http://localhost:8080
 ```
 
-Если порт 8080 занят, задайте `DASHBOARD_PORT=18090`. В Git Bash на Windows сначала выполните `export MSYS_NO_PATHCONV=1`.
+По умолчанию в docker compose дашборд на порту 18090 (18080 занимает API эмулятора организаторов); другой порт — `DASHBOARD_PORT`. В Git Bash на Windows сначала выполните `export MSYS_NO_PATHCONV=1`.
 
 **Только дашборд, без Docker:**
 
