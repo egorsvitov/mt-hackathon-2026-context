@@ -224,7 +224,15 @@ def _fit_evaluation(source, test, run_events, dwell_events, catalog, spec):
     )
 
 
-def run_training(data_path, catalog_path, cache, events_dir, artifacts) -> dict:
+def run_training(
+    data_path,
+    catalog_path,
+    cache,
+    events_dir,
+    artifacts,
+    *,
+    final_train_only: bool = False,
+) -> dict:
     artifacts.mkdir(parents=True, exist_ok=True)
     catalog = Catalog.load(catalog_path)
     train = pd.read_parquet(cache / "train.parquet")
@@ -254,7 +262,7 @@ def run_training(data_path, catalog_path, cache, events_dir, artifacts) -> dict:
             train, test, train_run, train_dwell, catalog, selected_spec
         )
         synthetic_test_mae = synthetic_result[-1]
-        if synthetic_test_mae <= real_result[-1]:
+        if final_train_only or synthetic_test_mae <= real_result[-1]:
             selected_result = synthetic_result
             use_synthetic = True
 
@@ -269,7 +277,7 @@ def run_training(data_path, catalog_path, cache, events_dir, artifacts) -> dict:
     ) = selected_result
     v2_candidate_test_mae = test_mae
     accepted_test = test_mae <= 72.49
-    if not accepted_test and selected_spec.name != "v1":
+    if not final_train_only and not accepted_test and selected_spec.name != "v1":
         selected_spec, selected_cv, use_synthetic = SPECS[0], baseline, False
         selected_result = _fit_evaluation(
             real_train, test, train_run, train_dwell, catalog, selected_spec
@@ -299,14 +307,23 @@ def run_training(data_path, catalog_path, cache, events_dir, artifacts) -> dict:
     ).to_csv(artifacts / "test_predictions.csv", index=False)
 
     training_source = train if use_synthetic else real_train
-    combined = pd.concat((training_source, test), ignore_index=True)
-    test_run, test_dwell = _load_events(events_dir, "test")
-    all_run = pd.concat((train_run, test_run), ignore_index=True).drop_duplicates(
-        ["trip_occurrence_id", "segment_id", "event_time", "available_at"]
-    )
-    all_dwell = pd.concat((train_dwell, test_dwell), ignore_index=True).drop_duplicates(
-        ["trip_occurrence_id", "visit_id", "event_time", "available_at"]
-    )
+    if final_train_only:
+        combined = training_source.copy()
+        all_run = train_run
+        all_dwell = train_dwell
+        final_phase = "train_to_validate"
+        final_training_split = "train"
+    else:
+        combined = pd.concat((training_source, test), ignore_index=True)
+        test_run, test_dwell = _load_events(events_dir, "test")
+        all_run = pd.concat((train_run, test_run), ignore_index=True).drop_duplicates(
+            ["trip_occurrence_id", "segment_id", "event_time", "available_at"]
+        )
+        all_dwell = pd.concat((train_dwell, test_dwell), ignore_index=True).drop_duplicates(
+            ["trip_occurrence_id", "visit_id", "event_time", "available_at"]
+        )
+        final_phase = "train_plus_test_to_validate"
+        final_training_split = "train+test"
     if selected_spec.use_components:
         combined, validate, final_run, final_dwell = _enrich(
             combined, validate, all_run, all_dwell, catalog, selected_spec.use_experts, None
@@ -317,9 +334,11 @@ def run_training(data_path, catalog_path, cache, events_dir, artifacts) -> dict:
         combined,
         selected_spec,
         metadata={
-            "phase": "train_plus_test_to_validate",
+            "phase": final_phase,
             "catalog_version": catalog.version,
             "use_synthetic_training": use_synthetic,
+            "final_training_split": final_training_split,
+            "uses_test_for_final_training": not final_train_only,
             "python": platform.python_version(),
             "catboost": catboost.__version__,
         },
@@ -351,6 +370,9 @@ def run_training(data_path, catalog_path, cache, events_dir, artifacts) -> dict:
         "synthetic_ablation": _reportable(synthetic_cv),
         "use_synthetic_training": use_synthetic,
         "experiments": [_reportable(result) for result in cv_results],
+        "final_train_only": final_train_only,
+        "final_training_split": final_training_split,
+        "uses_test_for_final_training": not final_train_only,
         "final_training_rows": len(combined),
         "submission_rows": len(submission),
     }

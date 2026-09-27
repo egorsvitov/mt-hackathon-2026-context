@@ -22,6 +22,16 @@ uv run delay-v2 train
 uv run delay-v2 evaluate
 uv run delay-v2 predict --output artifacts/prediction.csv
 ```
+Чтобы исключить пересечение `test` и `validate`, финальную модель и component models можно
+обучить только на `train`. `test` при этом используется лишь для отчётной оценки, но не входит
+в fit финального bundle и не поставляет run/dwell events:
+
+```bash
+uv run delay-v2 \
+  --artifacts-dir artifacts/modeling_train_only \
+  train --final-train-only
+```
+
 
 Можно передать пути явно через `--data-dir` и `--catalog`. `prepare` занимает несколько минут:
 HMM причинно проигрывает телеметрию до каждой прогнозной точки.
