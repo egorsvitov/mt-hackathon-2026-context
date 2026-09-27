@@ -1,0 +1,21 @@
+backend.app.models package
+==========================
+
+Submodules
+----------
+
+backend.app.models.telemetry module
+-----------------------------------
+
+.. automodule:: backend.app.models.telemetry
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Module contents
+---------------
+
+.. automodule:: backend.app.models
+   :members:
+   :show-inheritance:
+   :undoc-members:

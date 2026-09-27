@@ -1,0 +1,21 @@
+backend.app.api.websocket package
+=================================
+
+Submodules
+----------
+
+backend.app.api.websocket.dashboard\_ws module
+----------------------------------------------
+
+.. automodule:: backend.app.api.websocket.dashboard_ws
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Module contents
+---------------
+
+.. automodule:: backend.app.api.websocket
+   :members:
+   :show-inheritance:
+   :undoc-members:

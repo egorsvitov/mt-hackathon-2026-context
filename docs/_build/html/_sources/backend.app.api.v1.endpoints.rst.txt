@@ -1,0 +1,45 @@
+backend.app.api.v1.endpoints package
+====================================
+
+Submodules
+----------
+
+backend.app.api.v1.endpoints.dashboard module
+---------------------------------------------
+
+.. automodule:: backend.app.api.v1.endpoints.dashboard
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+backend.app.api.v1.endpoints.health module
+------------------------------------------
+
+.. automodule:: backend.app.api.v1.endpoints.health
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+backend.app.api.v1.endpoints.incidents module
+---------------------------------------------
+
+.. automodule:: backend.app.api.v1.endpoints.incidents
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+backend.app.api.v1.endpoints.telemetry module
+---------------------------------------------
+
+.. automodule:: backend.app.api.v1.endpoints.telemetry
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Module contents
+---------------
+
+.. automodule:: backend.app.api.v1.endpoints
+   :members:
+   :show-inheritance:
+   :undoc-members:

@@ -1,0 +1,21 @@
+backend.app.core package
+========================
+
+Submodules
+----------
+
+backend.app.core.config module
+------------------------------
+
+.. automodule:: backend.app.core.config
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Module contents
+---------------
+
+.. automodule:: backend.app.core
+   :members:
+   :show-inheritance:
+   :undoc-members:
