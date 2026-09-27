@@ -256,7 +256,9 @@ class Pipeline:
         plan = self.network.plans[tr]
         try:
             if int(tr) not in self.model_features.plans:
-                self.model_features.register_plan(tr, plan.visit_id, plan.plan, plan.lon, plan.lat)
+                self.model_features.register_plan(tr, plan.visit_id, plan.plan,
+                    plan.ml_lon if plan.ml_lon is not None else plan.lon,
+                    plan.ml_lat if plan.ml_lat is not None else plan.lat)
             model_input = self.model_features.request(tr, T, f.target_stop_id,
                 float(plan.plan[ctx['target_idx']]), f.current_delay_sec)
             ml = await ml_client.predict(f, model_input)

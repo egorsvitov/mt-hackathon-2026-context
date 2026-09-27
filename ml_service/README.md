@@ -21,6 +21,9 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
 `GET /health` показывает `requested_mode`, `active_mode`, `degraded_reason`.
 Если недоступен весь сервис, backend сохраняет fallback текущей задержки.
 CPU-ансамбль намеренно не поддерживается. GPU-образ использует torch 2.14.0/cu130.
+Одиночный запрос encoder дополняется независимыми копиями до batch=128:
+это сохраняет CUDA-геометрию основного batch обучения/проверки. Сохранённый
+хвост batch=23 имеет небольшие численные отличия — см. [проверки](VERIFICATION.md).
 Для сетей с недоступным PyPI можно передать build argument `PIP_INDEX_URL`.
 
 ## Контракт и данные
@@ -49,6 +52,8 @@ inference-адаптация TS2Vec (MIT, см. runtime/TS2VEC_LICENSE), без 
 python -m venv .venv
 .venv/bin/pip install -r ml_service/requirements.txt pytest httpx
 .venv/bin/python -m pytest ml_service/tests -q
+.venv/bin/pip install pydantic-settings
+.venv/bin/python -m pytest backend/tests -q
 ```
 
 Контрольный fixture не содержит label. Метрики исследований: standalone seed42
@@ -58,4 +63,4 @@ train по траекториям; эти оценки не являются н�
 Воспроизведение с датасетным cur_dev_s проверяет реализацию, но не качество
 онлайн-детектора задержки. Перед merge обязательны проверки актуального main,
 реального GPU-контейнера и end-to-end replay; непроведённые проверки нельзя
-считать пройденными.
+считать пройденными. Результаты и открытые ограничения: [VERIFICATION.md](VERIFICATION.md).

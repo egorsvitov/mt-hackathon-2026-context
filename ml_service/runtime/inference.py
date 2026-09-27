@@ -76,7 +76,11 @@ class Predictor:
             if set(req.route_features) != expected:
                 raise ValueError('route_features must match the 62-field production manifest')
             row = dict(req.route_features)
-            if float(row['cur_dev_s']) != req.cur_dev_s:
+            try:
+                feature_cur = float(row['cur_dev_s'])
+            except (TypeError, ValueError) as exc:
+                raise ValueError('cur_dev_s must be a finite numeric feature') from exc
+            if feature_cur != req.cur_dev_s:
                 raise ValueError('cur_dev_s context and features disagree')
             row.update(sample_id=req.sample_id, mm_sequence_id=req.sequence_id or '__unknown__')
             rows.append(row)

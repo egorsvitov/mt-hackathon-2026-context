@@ -66,6 +66,9 @@ class VehiclePlan:
     lat: np.ndarray
     lon: np.ndarray
     pos: dict = field(default_factory=dict)
+    # Exact schedule geometry for ML; dashboard stop snapping must not alter features.
+    ml_lat: np.ndarray | None = None
+    ml_lon: np.ndarray | None = None
 
     def __post_init__(self):
         self.pos = {int(v): k for k, v in enumerate(self.visit_id)}
@@ -147,6 +150,9 @@ class NetworkStore:
         # только плановые колонки: факт прибытия онлайн-контур не должен видеть
         df = pd.read_csv(path, usecols=PLAN_COLUMNS)
         df["t_plan"] = naive_to_epoch(df["time_begin"])
+        schedule_coords = df['geom'].str.extract(r'POINT \(([-+0-9.eE]+) ([-+0-9.eE]+)\)').astype(float)
+        df['_ml_lon'] = schedule_coords[0]
+        df['_ml_lat'] = schedule_coords[1]
 
         # остановку из плана считаем той же, что в сети, если до неё не больше 3 м
         net_keys = np.array(list(self.stops), dtype=int)
@@ -190,6 +196,8 @@ class NetworkStore:
                 stop=stop,
                 lat=np.array([self.stops[s]["lat"] for s in stop]),
                 lon=np.array([self.stops[s]["lon"] for s in stop]),
+                ml_lat=g['_ml_lat'].to_numpy(float),
+                ml_lon=g['_ml_lon'].to_numpy(float),
             )
             if tr not in self.routes:
                 self.routes[tr] = self._straight_route(tr, stop)

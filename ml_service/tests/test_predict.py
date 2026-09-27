@@ -36,6 +36,9 @@ def test_contract_rejects_mismatched_features():
     with pytest.raises(ValueError):model.predict(req)
     req=request();req.route_features['cur_dev_s']=41
     with pytest.raises(ValueError):model.predict(req)
+    req=request();req.route_features['cur_dev_s']=None
+    with TestClient(app) as client:
+        assert client.post('/predict',json=req.model_dump()).status_code==422
 
 def test_encoder_failure_degrades(monkeypatch):
     import builtins
@@ -96,3 +99,16 @@ def test_empty_history_missing_route():
 def test_saved_catboost_fixture():
     fixture=json.loads((Path(__file__).parent/'fixtures/prediction.json').read_text())
     assert model.predict(PredictionRequest.model_validate(fixture['request']))==pytest.approx(fixture['prediction'],rel=1e-6,abs=1e-6)
+
+def test_saved_gpu_fixture():
+    import importlib.util
+    if importlib.util.find_spec('torch') is None:
+        pytest.skip('Optional GPU stack not installed in CPU environment')
+    import torch
+    if not torch.cuda.is_available():
+        pytest.skip('CUDA device unavailable')
+    fixture=json.loads((Path(__file__).parent/'fixtures/prediction.json').read_text())
+    ensemble=Predictor(BUNDLE,'ensemble')
+    assert ensemble.mode=='ensemble',ensemble.degraded_reason
+    actual=ensemble.predict(PredictionRequest.model_validate(fixture['request']))
+    assert actual==pytest.approx(fixture['ensemble_prediction'],rel=1e-6,abs=1e-6)
