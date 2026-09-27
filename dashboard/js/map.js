@@ -17,16 +17,35 @@
   function buildRoutes(net, activePatterns) {
     const features = [];
     for (const r of net.routes) {
+      const active = activePatterns && activePatterns.get(r.tr_id);
+      const segments = r.segments.filter((s) => !active || s.route_pattern_id === active);
       for (const dashed of [false, true]) {
-        const active = activePatterns && activePatterns.get(r.tr_id);
-        const lines = r.segments
-          .filter((s) => !!s.synthetic === dashed && (!active || s.route_pattern_id === active))
-          .map((s) => s.path.map(lngLat));
-        if (!lines.length) continue;
+        const chosen = segments.filter((s) => !!s.synthetic === dashed && s.path.length > 1);
+        if (!chosen.length) continue;
         features.push({
-          type: 'Feature', id: r.tr_id * 2 + (dashed ? 1 : 0),
-          properties: { tr_id: r.tr_id, dashed },
-          geometry: { type: 'MultiLineString', coordinates: lines },
+          type: 'Feature', id: r.tr_id * 4 + (dashed ? 1 : 0),
+          properties: { tr_id: r.tr_id, dashed, join: false },
+          geometry: { type: 'MultiLineString', coordinates: chosen.map((s) => s.path.map(lngLat)) },
+        });
+        // В данных сегменты отсортированы по ID, поэтому стыкуем по порядку остановок.
+        const byPair = new Map(chosen.map((s) => [`${s.route_pattern_id}:${s.from}:${s.to}`, s]));
+        const patterns = new Set(chosen.map((s) => s.route_pattern_id));
+        const joins = [];
+        for (let k = 0; k + 2 < r.stops.length; k++) {
+          const from = r.stops[k], via = r.stops[k + 1], to = r.stops[k + 2];
+          for (const pattern of patterns) {
+            const prev = byPair.get(`${pattern}:${from}:${via}`);
+            const next = byPair.get(`${pattern}:${via}:${to}`);
+            if (!prev || !next) continue;
+            const a = prev.path[prev.path.length - 1], b = next.path[0];
+            if (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) < 1e-7) continue;
+            joins.push([lngLat(a), lngLat(b)]);
+          }
+        }
+        if (joins.length) features.push({
+          type: 'Feature', id: r.tr_id * 4 + (dashed ? 3 : 2),
+          properties: { tr_id: r.tr_id, dashed, join: true },
+          geometry: { type: 'MultiLineString', coordinates: joins },
         });
       }
     }
@@ -45,7 +64,7 @@
       this.snap = true;
       this.markers = new Map();
       this.routeState = new Map();
-      this.data = { sections: fc([]), targets: fc([]), stops: fc([]) };
+      this.data = { sections: fc([]), stops: fc([]) };
       this.activePatterns = new Map();
       this.patternSignature = '';
       this.routes = buildRoutes(net, this.activePatterns);
@@ -113,7 +132,6 @@
       const m = this.map, C = this.colors;
       m.addSource('routes', { type: 'geojson', data: this.routes });
       m.addSource('sections', { type: 'geojson', data: this.data.sections });
-      m.addSource('targets', { type: 'geojson', data: this.data.targets });
       m.addSource('stops', { type: 'geojson', data: this.data.stops });
 
       const bySev = (e) => ['match', e, 'critical', C.critical, 'warning', C.warning, 'ok', C.ok, 'early', C.early, C.unknown];
@@ -122,20 +140,31 @@
       const round = { 'line-cap': 'round', 'line-join': 'round' };
       const selFilter = ['==', ['get', 'tr_id'], this.sel == null ? -1 : this.sel];
 
+      const width = ['match', fsev, 'critical', 4, 'warning', 3.5, 'early', 3, 2];
+      const opacity = ['case', fdim, 0.15, ['==', fsev, 'unknown'], 0.3, ['==', fsev, 'ok'], 0.4, 0.9];
       m.addLayer({
-        id: 'routes-line', type: 'line', source: 'routes', filter: ['!', ['get', 'dashed']], layout: round,
+        id: 'routes-joins', type: 'line', source: 'routes', filter: ['get', 'join'], layout: round,
+        paint: { 'line-color': bySev(fsev), 'line-width': ['case', ['get', 'dashed'], 2, width],
+          'line-opacity': ['case', fdim, 0.15, ['get', 'dashed'], 0.5, ['==', fsev, 'unknown'], 0.3, ['==', fsev, 'ok'], 0.4, 0.9] },
+      });
+      m.addLayer({
+        id: 'routes-line', type: 'line', source: 'routes', filter: ['all', ['!', ['get', 'dashed']], ['!', ['get', 'join']]], layout: round,
         paint: {
           'line-color': bySev(fsev),
-          'line-width': ['match', fsev, 'critical', 4, 'warning', 3.5, 'early', 3, 2],
-          'line-opacity': ['case', fdim, 0.15, ['==', fsev, 'unknown'], 0.3, ['==', fsev, 'ok'], 0.4, 0.9],
+          'line-width': width,
+          'line-opacity': opacity,
         },
       });
       m.addLayer({
-        id: 'routes-dash', type: 'line', source: 'routes', filter: ['get', 'dashed'],
+        id: 'routes-dash', type: 'line', source: 'routes', filter: ['all', ['get', 'dashed'], ['!', ['get', 'join']]],
         paint: { 'line-color': bySev(fsev), 'line-width': 2, 'line-dasharray': [1.5, 2.5], 'line-opacity': ['case', fdim, 0.15, 0.5] },
       });
       m.addLayer({
-        id: 'routes-selected', type: 'line', source: 'routes', filter: ['all', selFilter, ['!', ['get', 'dashed']]], layout: round,
+        id: 'routes-selected-joins', type: 'line', source: 'routes', filter: ['all', selFilter, ['get', 'join'], ['!', ['get', 'dashed']]], layout: round,
+        paint: { 'line-color': bySev(fsev), 'line-width': 5, 'line-opacity': 0.9 },
+      });
+      m.addLayer({
+        id: 'routes-selected', type: 'line', source: 'routes', filter: ['all', selFilter, ['!', ['get', 'dashed']], ['!', ['get', 'join']]], layout: round,
         paint: { 'line-color': bySev(fsev), 'line-width': 5, 'line-opacity': 0.9 },
       });
       // невидимая широкая линия, чтобы по тонкому маршруту было легко попасть мышью
@@ -145,11 +174,15 @@
         paint: { 'line-color': C.page, 'line-width': 11, 'line-opacity': ['case', ['get', 'dim'], 0.2, 0.55] },
       });
       m.addLayer({
-        id: 'sections-line', type: 'line', source: 'sections', filter: ['!', ['get', 'stale']], layout: round,
+        id: 'sections-line', type: 'line', source: 'sections', filter: ['all', ['!', ['get', 'stale']], ['!', ['get', 'recover']]], layout: round,
         paint: { 'line-color': bySev(['get', 'sev']), 'line-width': 6, 'line-opacity': ['case', ['get', 'dim'], 0.3, 0.95] },
       });
       m.addLayer({
-        id: 'sections-stale', type: 'line', source: 'sections', filter: ['get', 'stale'],
+        id: 'sections-recover', type: 'line', source: 'sections', filter: ['get', 'recover'], layout: round,
+        paint: { 'line-color': C.ok, 'line-width': 6, 'line-opacity': ['case', ['get', 'dim'], 0.3, ['get', 'stale'], 0.6, 0.95] },
+      });
+      m.addLayer({
+        id: 'sections-stale', type: 'line', source: 'sections', filter: ['all', ['get', 'stale'], ['!', ['get', 'recover']]],
         paint: { 'line-color': bySev(['get', 'sev']), 'line-width': 6, 'line-dasharray': [1.4, 1], 'line-opacity': ['case', ['get', 'dim'], 0.3, 0.9] },
       });
       // остановки кладём поверх участка, иначе ближайшие прячутся под линией
@@ -173,26 +206,17 @@
         },
         paint: { 'text-color': ['match', st, 'target', C.text, C.text2], 'text-halo-color': C.page, 'text-halo-width': 1.8 },
       });
-      m.addLayer({
-        id: 'targets', type: 'circle', source: 'targets',
-        paint: {
-          'circle-radius': 6, 'circle-color': C.surface, 'circle-stroke-width': 3, 'circle-stroke-color': bySev(['get', 'sev']),
-          'circle-opacity': ['case', ['get', 'dim'], 0.4, 1], 'circle-stroke-opacity': ['case', ['get', 'dim'], 0.4, 1],
-        },
-      });
-
       for (const [id, st] of this.routeState) m.setFeatureState({ source: 'routes', id }, st);
       if (!this.eventsBound) this.bindEvents();
       this.ready = true;
     }
 
-    /** Клики и подсказки на маршрутах, остановках и участках. */
+    /** Клики и подсказки на маршрутах и остановках. */
     bindEvents() {
       const m = this.map;
       this.eventsBound = true;
       const hover = {
         'routes-hit': (f) => this.h.routeTooltip(f.properties.tr_id),
-        targets: (f) => f.properties.html,
         stops: (f) => `<b>${U.esc(f.properties.name)}</b>${f.properties.tip ? `<br>${U.esc(f.properties.tip)}` : ''}`,
       };
       for (const [id, html] of Object.entries(hover)) {
@@ -204,8 +228,7 @@
         m.on('mouseleave', id, () => { m.getCanvas().style.cursor = ''; if (!this.hoverVehicle) this.popup.remove(); });
       }
       m.on('click', (e) => {
-        const layers = ['targets', 'routes-hit'].filter((id) => m.getLayer(id));
-        const f = m.queryRenderedFeatures(e.point, { layers })[0];
+        const f = m.queryRenderedFeatures(e.point, { layers: ['routes-hit'] })[0];
         if (f) this.h.onSelect(f.properties.tr_id);
       });
     }
@@ -232,35 +255,34 @@
       if (!this.map) return;
       if (sel !== this.sel) {
         this.sel = sel;
-        if (this.ready) this.map.setFilter('routes-selected', ['all', ['==', ['get', 'tr_id'], sel == null ? -1 : sel], ['!', ['get', 'dashed']]]);
-      }
-      for (const r of this.net.routes) {
-        const st = { sev: sev.get(r.tr_id) || 'unknown', dim: sel != null && sel !== r.tr_id };
-        const key = `${st.sev}:${st.dim}`;
-        for (const id of [r.tr_id * 2, r.tr_id * 2 + 1]) {
-          if (this.routeState.get(id) && this.routeState.get(id)._k === key) continue;
-          this.routeState.set(id, { ...st, _k: key });
-          if (this.ready) this.map.setFeatureState({ source: 'routes', id }, st);
+        if (this.ready) {
+          const selected = ['==', ['get', 'tr_id'], sel == null ? -1 : sel];
+          this.map.setFilter('routes-selected', ['all', selected, ['!', ['get', 'dashed']], ['!', ['get', 'join']]]);
+          this.map.setFilter('routes-selected-joins', ['all', selected, ['get', 'join'], ['!', ['get', 'dashed']]]);
         }
+      }
+      for (const feature of this.routes.features) {
+        const tr = feature.properties.tr_id, id = feature.id;
+        const st = { sev: sev.get(tr) || 'unknown', dim: sel != null && sel !== tr };
+        const key = `${st.sev}:${st.dim}`;
+        if (this.routeState.get(id) && this.routeState.get(id)._k === key) continue;
+        this.routeState.set(id, { ...st, _k: key });
+        if (this.ready) this.map.setFeatureState({ source: 'routes', id }, st);
       }
     }
 
     /** Проблемные участки: от последней пройденной остановки до целевой. */
     setSections(list) {
-      const lines = [], points = [];
+      const lines = [];
       for (const s of list) {
-        const paths = s.paths || (s.path ? [s.path] : []);
-        for (const path of paths) {
+        const parts = s.parts || [];
+        for (const { path, recover } of parts) {
           if (path.length > 1) {
-            lines.push({ type: 'Feature', properties: { tr_id: s.tr, sev: s.sev, stale: !!s.stale, dim: !!s.dim }, geometry: { type: 'LineString', coordinates: path.map(lngLat) } });
+            lines.push({ type: 'Feature', properties: { tr_id: s.tr, sev: s.sev, stale: !!s.stale, dim: !!s.dim, recover: !!recover }, geometry: { type: 'LineString', coordinates: path.map(lngLat) } });
           }
-        }
-        if (s.target) {
-          points.push({ type: 'Feature', properties: { tr_id: s.tr, sev: s.sev, dim: !!s.dim, html: s.target.html }, geometry: { type: 'Point', coordinates: [s.target.lon, s.target.lat] } });
         }
       }
       this.setSource('sections', fc(lines));
-      this.setSource('targets', fc(points));
     }
 
     /** Остановки на карте. small делает их мельче, когда показаны все остановки сети. */
