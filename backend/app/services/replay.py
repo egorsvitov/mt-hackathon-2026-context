@@ -38,6 +38,10 @@ class ReplayFeeder:
         self.task: asyncio.Task | None = None
         self.t: np.ndarray | None = None
         self.records: list[RawNDTPRecord] = []
+        # start() ждёт предпрогон до того, как запомнит задачу: без блокировки два старта
+        # (автоперезапуск дня и перемотка) шли бы параллельно по общему self.idx.
+        self.lock = asyncio.Lock()
+        self.gen = 0  # поколение: stop() во время предпрогона отменяет начатый старт
 
     def load(self, split: str) -> None:
         path = Path(settings.DATA_DIR) / split / "traffic.csv"
@@ -106,20 +110,25 @@ class ReplayFeeder:
     async def start(self, speed: float | None = None, start: str | None = None) -> None:
         if self.t is None:
             self.load(settings.REPLAY_SPLIT)
-        await self.stop()
-        self.speed = settings.REPLAY_SPEED if speed is None else max(0.0, float(speed))
-        begin = self.parse_start(start)
-        self.p.reset()
-        self.link_down = False
-        # Предпрогон: 20 минут истории до старта — состояние ТС и прибытия.
-        self.idx = int(np.searchsorted(self.t, begin - PREROLL_SEC))
-        self.active = True
-        self.t0, self.w0 = begin, time.monotonic()
-        await self._feed_until(begin)
-        self.task = asyncio.create_task(self._run())
-        log.info("Replay: старт %s, x%s", start or settings.REPLAY_START, self.speed)
+        async with self.lock:
+            await self.stop()
+            gen = self.gen
+            self.speed = settings.REPLAY_SPEED if speed is None else max(0.0, float(speed))
+            begin = self.parse_start(start)
+            self.p.reset()
+            self.link_down = False
+            # Предпрогон: 20 минут истории до старта — состояние ТС и прибытия.
+            self.idx = int(np.searchsorted(self.t, begin - PREROLL_SEC))
+            self.active = True
+            self.t0, self.w0 = begin, time.monotonic()
+            await self._feed_until(begin)
+            if gen != self.gen:  # за время предпрогона воспроизведение остановили
+                return
+            self.task = asyncio.create_task(self._run())
+            log.info("Replay: старт %s, x%s", start or settings.REPLAY_START, self.speed)
 
     async def stop(self) -> None:
+        self.gen += 1
         if self.task:
             self.t0 = self.clock()
             self.active = False

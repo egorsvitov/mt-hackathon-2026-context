@@ -114,6 +114,9 @@ class Pipeline:
         self.last_packet_wall: float | None = None
         self.last_event_t: float | None = None
         self.reconnects = 0
+        self.rejected_future = 0
+        self._future_warned: set[str] = set()
+        self.live_seen = False  # после остановки воспроизведения пришёл живой поток
         if self.evaluator:
             self.evaluator = Evaluator(self.evaluator.facts)
 
@@ -164,7 +167,14 @@ class Pipeline:
         return "replay" if self.replay and self.replay.active else "live"
 
     def now(self) -> float:
-        return self.replay.clock() if self.mode == "replay" else time.time()
+        if self.mode == "replay":
+            return self.replay.clock()
+        # Воспроизведение остановлено, а живого потока ещё не было: часы замирают на последнем
+        # моменте воспроизведения — дашборд показывает последнее состояние как устаревшее,
+        # а не удаляет прогнозы и инциденты как «старые» относительно текущей даты.
+        if not self.live_seen and self.replay is not None and self.replay.t is not None:
+            return self.replay.clock()
+        return time.time()
 
     def ingest_status(self) -> str:
         if self.mode == "replay":
@@ -180,6 +190,21 @@ class Pipeline:
 
     async def ingest(self, rec: RawNDTPRecord) -> None:
         t = float(rec.timestamp)
+        if not self.live_seen and rec.source != "replay" and self.mode == "live":
+            # Живой поток после остановленного воспроизведения: часы снова реальные, а состояние
+            # воспроизведения (прогнозы, инциденты, треки) — из другой линии времени, сбрасываем.
+            if self.replay is not None and self.replay.t is not None:
+                self.reset()
+            self.live_seen = True
+        now = self.now()
+        if t > now + settings.MAX_FUTURE_SKEW_SEC:
+            # Часы трекера убежали вперёд или поток другой даты идёт поверх воспроизведения:
+            # такая отметка «заморозила» бы ТС — следующие точки считались бы опоздавшими.
+            self.rejected_future += 1
+            if rec.tr_id not in self._future_warned:
+                self._future_warned.add(rec.tr_id)
+                log.warning("tr_id=%s: отметка на %.0f с новее часов системы отброшена", rec.tr_id, t - now)
+            return
         self.last_packet_wall = time.time()
         self.last_event_t = (
             t if self.last_event_t is None else max(self.last_event_t, t)
@@ -473,6 +498,7 @@ class Pipeline:
             else None,
             "queue_lag_s": round(lag, 1),
             "reconnects": self.reconnects,
+            "rejected_future": self.rejected_future,
             "mae_live_s": round(ev.sum_err / ev.n, 1) if ev and ev.n else None,
             "mae_baseline_live_s": round(ev.sum_base / ev.n, 1)
             if ev and ev.n

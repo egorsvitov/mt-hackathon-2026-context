@@ -954,6 +954,14 @@
   function update(force) {
     const s = App.src.snapshot(App.now, App.linkDownSince);
     App.snap = s;
+    if (App.src.restarts && App.src.restarts !== App.seenRestarts) {
+      // Backend начал воспроизведение заново: связь там восстановлена, история страницы сброшена.
+      App.seenRestarts = App.src.restarts;
+      App.apiLinkDown = false;
+      App.restoredAt = null;
+      syncLink();
+      App.lastPage = 0;
+    }
     if (force) App.selChanged = true;
     trackEvents(s);
     sampleLink(s);

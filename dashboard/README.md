@@ -33,10 +33,10 @@
 python dashboard/tools/build_fixtures.py --data-dir ../data/dataset  # базовый replay и прогнозы
 # Затем постройте network.json и matched replay по map_matching/README.md.
 python dashboard/tools/fetch_basemap.py                          # подложка карты, ~60 МБ (один раз)
-DATA_DIR=../data/dataset docker compose up --build                    # http://localhost:8080
+DATA_DIR=../data/dataset docker compose up --build                    # http://localhost:18090
 ```
 
-Если порт 8080 занят, задайте `DASHBOARD_PORT=18090`. В Git Bash на Windows сначала выполните `export MSYS_NO_PATHCONV=1`.
+По умолчанию в docker compose дашборд на порту 18090 (18080 занимает API эмулятора организаторов); другой порт — `DASHBOARD_PORT`. В Git Bash на Windows сначала выполните `export MSYS_NO_PATHCONV=1`.
 
 **Только дашборд, без Docker:**
 

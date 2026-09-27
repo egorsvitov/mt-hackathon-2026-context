@@ -2,7 +2,8 @@
 # Перед первым запуском:
 #   См. map_matching/README.md: каталог, network.json и matched replay
 #   python dashboard/tools/fetch_basemap.py                         # подложка карты (~60 МБ)
-# Запуск: DATA_DIR=<путь к датасету> docker compose up --build   ->  http://localhost:8080
+# Запуск: DATA_DIR=<путь к датасету> docker compose up --build   ->  http://localhost:18090
+# Эмулятор организаторов (сначала docker load -i <датасет>/ndtp-telemetry-emulator.tar):  --profile emulator
 services:
   ml-service:
     build:
@@ -50,10 +51,17 @@ services:
 
   dashboard:
     build: ./dashboard
-    ports: ["${DASHBOARD_PORT:-18080}:80"]
+    ports: ["${DASHBOARD_PORT:-18090}:80"]  # 18080 занят API эмулятора организаторов
     environment:
       DASHBOARD_API: /api/v1
       BACKEND_URL: http://backend:8000
     depends_on:
       backend:
         condition: service_started
+
+  # Эмулятор организаторов. Конфиг: POST http://localhost:18080/api/config
+  # c "targetHost": "ndtp-parser", "targetPort": 9201 (см. ndtp-parser/README.md).
+  ndtp-emulator:
+    image: ndtp-telemetry-emulator:1.0
+    profiles: ["emulator"]
+    ports: ["${EMULATOR_PORT:-18080}:18080"]
