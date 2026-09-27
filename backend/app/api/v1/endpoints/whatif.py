@@ -1,4 +1,4 @@
-"""Меры диспетчера (what-if): дополнительный автобус на линии и сокращение стоянок."""
+"""Меры диспетчера: резервный автобус и сокращение стоянок."""
 
 from typing import Literal
 
@@ -11,14 +11,16 @@ router = APIRouter()
 
 
 class ReserveRequest(BaseModel):
+    """Запрос на выпуск резервного автобуса."""
     tr_id: str = Field(..., description="ТС, на линию которого выпускается резерв")
     ready_min: float = Field(10, ge=0, le=120, description="Через сколько минут резерв готов к выходу")
     start_visit_id: int | None = Field(
-        None, description="Посещение, с которого резерв берёт рейс; по умолчанию — ближайшее, к которому успевает"
+        None, description="Посещение, с которого резерв берёт рейс. По умолчанию ближайшее, к которому он успевает"
     )
 
 
 class DwellRequest(BaseModel):
+    """Запрос на сокращение стоянок."""
     tr_id: str
     scope: Literal["vehicle", "route"] = Field("vehicle", description="Только это ТС или вся линия")
     cut_s: float = Field(10, ge=0, le=60, description="На сколько секунд короче стоянка на каждой остановке")
@@ -26,6 +28,7 @@ class DwellRequest(BaseModel):
 
 
 def _whatif():
+    """Сервис мер или 503, если backend ещё не запустился."""
     if pipeline.whatif is None:
         raise HTTPException(503, "Меры недоступны: backend ещё не запущен")
     return pipeline.whatif
@@ -33,13 +36,13 @@ def _whatif():
 
 @router.get("")
 async def list_measures():
-    """Действующие меры и их эффект на текущий момент (пересчитывается по свежим прогнозам)."""
+    """Действующие меры и их эффект, пересчитанный по свежим прогнозам."""
     return _whatif().list_out()
 
 
 @router.post("/reserve")
 async def release_reserve(req: ReserveRequest):
-    """Выпустить дополнительный автобус: берёт рейс с остановки, к которой успевает, и идёт по графику."""
+    """Выпускает резервный автобус на рейс опаздывающего ТС."""
     try:
         return _whatif().add_reserve(str(req.tr_id), req.ready_min, req.start_visit_id)
     except KeyError as e:
@@ -50,7 +53,7 @@ async def release_reserve(req: ReserveRequest):
 
 @router.post("/dwell")
 async def shorten_dwell(req: DwellRequest):
-    """Сократить стоянки на остановках (и отстой на конечной) для ТС или всей линии."""
+    """Сокращает стоянки и отстой на конечной для ТС или всей линии."""
     try:
         return _whatif().add_dwell(str(req.tr_id), req.scope, req.cut_s, req.short_layover)
     except KeyError as e:
@@ -59,7 +62,7 @@ async def shorten_dwell(req: DwellRequest):
 
 @router.delete("/{measure_id}")
 async def cancel_measure(measure_id: int):
-    """Отменить меру; резервный автобус снимается с линии."""
+    """Отменяет меру. Резервный автобус снимается с линии."""
     if not _whatif().remove(measure_id):
         raise HTTPException(404, "Мера не найдена")
     return {"status": "cancelled", "id": measure_id}

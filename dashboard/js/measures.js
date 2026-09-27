@@ -1,17 +1,15 @@
-/* Меры диспетчера (what-if): выпуск дополнительного автобуса и сокращение стоянок.
-   Диалог с параметрами, уведомления; меры применяет и считает backend (/whatif):
-   резерв — настоящий автобус линии на карте, для стоянок — опоздание «как есть» и «с мерой». */
+/* Меры диспетчера: дополнительный автобус и сокращение стоянок.
+   Здесь диалог и уведомления, сами меры применяет и считает backend (/whatif).
+   Без backend меры считаются локально по расписанию, это демо-режим. */
 (function () {
   'use strict';
 
   const $ = (id) => document.getElementById(id);
-  const TRIP_GAP_SEC = 300; // пауза в расписании длиннее 5 мин — конец рейса (отстой на конечной)
+  const TRIP_GAP_SEC = 300; // пауза в расписании дольше 5 минут значит конец рейса
 
   const M = {};
   let App = null;
   let current = null; // открытый диалог: {kind, tr}
-
-  // ------------------------------------------------------------------ расчёт по расписанию
 
   /** Остановка, с которой резерв успевает пойти по графику, и конец текущего рейса. */
   function reservePlan(tr, readyMin, startK) {
@@ -35,8 +33,6 @@
 
   const stopName = (visits, k) => App.net.stopName(visits.stop[k]);
 
-  // ------------------------------------------------------------------ уведомления
-
   function toast(html, kind = 'info', ms = 2000) {
     const box = $('toasts');
     const el = document.createElement('div');
@@ -47,8 +43,6 @@
     setTimeout(() => el.classList.add('hide'), ms);
     setTimeout(() => el.remove(), ms + 400);
   }
-
-  // ------------------------------------------------------------------ диалог
 
   function field(label, control, hint) {
     return `<label class="mf"><span class="mf-l">${label}</span>${control}${hint ? `<span class="mf-h">${hint}</span>` : ''}</label>`;
@@ -115,9 +109,9 @@
   const available = () => App && App.src.kind === 'api';
   const same = (a, b) => String(a) === String(b);
 
-  let localMeasures = []; // локальные (демо) — вне snapshot, иначе пропадают при опросе
+  let localMeasures = []; // демо-меры держим отдельно от snapshot, иначе опрос их затрёт
 
-  /** Действующие меры: локальные (демо) + от backend, если есть. */
+  /** Действующие меры: локальные и от backend. */
   function list() {
     const backend = (App.snap && App.snap.measures) || [];
     const seen = new Set();
@@ -206,13 +200,13 @@
     }
   }
 
-  /** Меры, относящиеся к ТС: его собственные, мера линии, резерв (для самого резерва тоже). */
+  /** Меры, которые касаются ТС: его собственные, меры его линии и резерв. */
   function forTr(tr) {
     return list().filter((m) => same(m.tr_id, tr) || same(m.virtual_tr_id, tr) ||
       (m.kind === 'dwell' && (m.vehicles || []).some((v) => same(v.tr_id, tr))));
   }
 
-  /** Прогноз опоздания по остановкам впереди «как есть» и «с мерой» для ТС (или null). */
+  /** Опоздание на остановках впереди без меры и с мерой, или null. */
   function projection(tr) {
     for (const m of list()) {
       if (m.kind !== 'dwell') continue;
@@ -222,7 +216,7 @@
     return null;
   }
 
-  /** Резерв, выпущенный на линию, если tr — сам резервный автобус. */
+  /** Мера-резерв, если tr сам резервный автобус. */
   function reserveOf(tr) {
     return list().find((m) => m.kind === 'reserve' && same(m.virtual_tr_id, tr)) || null;
   }

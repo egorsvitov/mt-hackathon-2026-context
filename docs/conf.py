@@ -1,14 +1,11 @@
 import os
 import sys
 
-# Добавляем пути к нашему коду, чтобы Sphinx мог его найти
-basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
-sys.path.insert(0, basedir)
-sys.path.insert(0, os.path.join(basedir, 'app'))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'ml_service')))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'ml_service', 'app')))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'ndtp-parser')))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'map_matching', 'src')))
+# backend документируется как пакет app, поэтому его папка идёт первой.
+# ml_service нужен только ради runtime, у него тоже есть пакет app, поэтому он последний.
+root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+for sub in ('ml_service', 'map_matching/src', 'ndtp-parser', 'backend'):
+    sys.path.insert(0, os.path.join(root, sub))
 
 project = 'Московский Транспорт: Хакатон 2026'
 copyright = '2026, Team'
@@ -28,4 +25,4 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 # Тема оформления
 html_theme = 'sphinx_rtd_theme'
-html_static_path = ['_static']
+html_static_path = []

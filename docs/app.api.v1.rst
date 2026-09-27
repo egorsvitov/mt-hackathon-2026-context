@@ -1,7 +1,7 @@
-app package
-===========
+app.api.v1 package
+==================
 
-.. automodule:: app
+.. automodule:: app.api.v1
    :members:
    :show-inheritance:
    :undoc-members:
@@ -12,10 +12,7 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
-   app.api
-   app.core
-   app.schemas
-   app.services
+   app.api.v1.endpoints
 
 Submodules
 ----------
@@ -23,4 +20,4 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
-   app.main
+   app.api.v1.router

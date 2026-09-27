@@ -5,3 +5,4 @@
 **/*.pyc
 map_matching/artifacts
 scratch
+dataset

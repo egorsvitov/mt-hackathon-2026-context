@@ -1,8 +1,6 @@
 # Контракт данных дашборда
 
-Документ фиксирует, в каком виде ML-модуль и backend отдают данные дашборду.
-Формат взят из плана команды (`planning/plan_gpt6_astra.md`, разделы 6 и 8) и дополнен
-полями, без которых дашборду не нарисовать карточку инцидента.
+В каком виде backend отдаёт данные дашборду.
 
 Контракт реализован в backend (`backend/app/api/v1/endpoints/`, схемы — `backend/app/schemas/dashboard.py`,
 Swagger — `http://localhost:8000/docs`). Эталон ответов лежит в [`contract/examples/`](contract/examples/): его

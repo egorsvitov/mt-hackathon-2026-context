@@ -1,26 +1,28 @@
-Добро пожаловать в документацию проекта!
-========================================
+Предиктор задержек: документация кода
+=====================================
 
-Это автогенерируемая документация для бэкенда и ML-сервиса нашего решения.
+Документация собрана из докстрингов. Как устроена система и как её запустить,
+написано в README в корне репозитория.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Оглавление:
+   :caption: Backend
 
    modules
-   app
-   route_matching
-   backend_client
-   crc
+
+.. toctree::
+   :maxdepth: 1
+   :caption: NDTP-парсер
+
+   receiver
    framing
    protocol
-   receiver
+   crc
    traffic_adapter
+   backend_client
 
-Инфраструктура
---------------
-Решение состоит из:
+.. toctree::
+   :maxdepth: 2
+   :caption: Map matching
 
-* **Backend (FastAPI)** — пайплайн обработки телеметрии, расчет признаков.
-* **ML Service** — сохранённый CatBoost v2 seed42; опционально GPU-ансамбль TS2Vec + CatBoost. Инструкции и ограничения: ``ml_service/README.md``.
-* **Dashboard (Nginx + JS)** — визуализация на карте.
+   route_matching

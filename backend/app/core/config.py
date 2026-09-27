@@ -7,10 +7,6 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Transport Delay Predictor Backend"
     API_V1_STR: str = "/api/v1"
 
-    DATABASE_URL: str = (
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/transport_db"
-    )
-
     ML_SERVICE_URL: str = "http://localhost:8001/predict"
     ML_REQUEST_TIMEOUT: float = 1.5
     ML_MODEL_DIR: str = str(Path(__file__).resolve().parents[3] / 'ml_service/model')

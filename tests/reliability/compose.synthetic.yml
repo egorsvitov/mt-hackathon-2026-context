@@ -1,7 +1,0 @@
-# Backend на синтетическом датасете (несколько автобусов на маршруте), см. make_multibus.py.
-# SYN_DIR — абсолютный путь к папке, созданной make_multibus.py.
-services:
-  backend:
-    volumes:
-      - ${SYN_DIR:?}:/data:ro
-      - ${SYN_DIR:?}/refdata:/refdata:ro
