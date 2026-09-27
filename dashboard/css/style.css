@@ -147,6 +147,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
   padding: 6px 10px; font-size: 12px; white-space: nowrap;
 }
 .ghost.on { border-color: var(--crit); color: var(--crit); }
+.mb {
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface-2));
+  color: #fff; border-radius: 8px; padding: 6px 10px; font-size: 12px; white-space: nowrap;
+  cursor: pointer;
+}
+.mb:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mb:disabled { opacity: .5; cursor: not-allowed; }
 
 /* ---------------------------------------------------------------- баннер деградации */
 .banner {
@@ -399,6 +407,26 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
 .ghost.wide { width: 100%; }
 .ghost.sm { padding: 4px 9px; font-size: 11.5px; border-radius: 6px; }
 .linkbtn { border: 0; background: none; color: var(--accent); font-size: 11.5px; padding: 0; }
+.bell-wrap { position: relative; }
+.bell-btn { position: relative; padding: 6px 9px; }
+.bell-badge {
+  position: absolute; top: -5px; right: -5px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
+  background: var(--crit); color: #fff; font-size: 9.5px; line-height: 15px; text-align: center; font-weight: 700;
+}
+.bell-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 1001; width: 340px; max-height: 60vh;
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.bell-head { padding: 9px 12px; font-size: 12px; font-weight: 600; color: var(--text); border-bottom: 1px solid var(--border); }
+.bell-list { overflow-y: auto; padding: 4px 0; }
+.bell-item { display: flex; gap: 8px; padding: 7px 12px; font-size: 11.5px; line-height: 1.35; }
+.bell-item:hover { background: var(--surface-3); }
+.bell-item .be-ic { font-size: 14px; line-height: 1.2; flex: none; }
+.bell-item .be-body { min-width: 0; }
+.bell-item .be-text { color: var(--text); }
+.bell-item .be-time { font-size: 10px; color: var(--muted); margin-top: 1px; }
+.bell-empty { padding: 16px; font-size: 11.5px; color: var(--muted); text-align: center; }
 .muted { color: var(--muted); }
 
 /* ================================================================ сводка диспетчерской */
@@ -517,6 +545,19 @@ table.jr .jr-name { max-width: 260px; overflow: hidden; text-overflow: ellipsis;
 }
 .m-chip.reserve { background: color-mix(in srgb, var(--ok) 16%, var(--surface-2)); }
 .m-chip .linkbtn { color: var(--muted); font-size: 10.5px; padding: 0 2px; }
+.mrow {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin-top: 4px;
+  border-radius: 8px; background: var(--surface-2); cursor: pointer;
+  border-left: 3px solid var(--muted);
+}
+.mrow:hover { background: var(--surface-3); }
+.mrow.reserve { border-left-color: var(--ok); }
+.mrow.dwell { border-left-color: var(--accent); }
+.mrow .m-ic { font-size: 15px; line-height: 1; align-self: flex-start; }
+.mrow .m-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.mrow .m-t { font-size: 12px; color: var(--text); }
+.mrow .m-sub { font-size: 10px; color: var(--muted); margin-top: 1px; }
+.mrow .m-time { font-size: 10px; color: var(--muted); }
 button.primary {
   border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 8px;
   padding: 6px 14px; font-size: 12.5px; font-weight: 600;
@@ -575,4 +616,3 @@ button.primary:disabled { opacity: .45; cursor: not-allowed; }
 .d-q { margin: 2px 0 0; font-weight: 600; color: var(--text-2); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
 .d-opt { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
 .d-opt:hover { border-color: var(--accent); }
-=======

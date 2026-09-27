@@ -37,7 +37,7 @@
 
   // ------------------------------------------------------------------ уведомления
 
-  function toast(html, kind = 'info', ms = 8000) {
+  function toast(html, kind = 'info', ms = 2000) {
     const box = $('toasts');
     const el = document.createElement('div');
     el.className = `toast ${kind}`;
@@ -85,7 +85,6 @@
     const cut = $('m-cut') ? +$('m-cut').value : 10;
     const scope = document.querySelector('input[name="m-scope"]:checked');
     const sc = scope ? scope.value : 'vehicle';
-    const lay = $('m-layover') ? $('m-layover').checked : true;
     let body = `<p class="m-ctx">Линия <b>${U.esc(route ? route.name : `ТС ${tr}`)}</b></p>`;
     body += `<div class="mf"><span class="mf-l">Применить</span><div class="m-radio">` +
       `<label><input type="radio" name="m-scope" value="vehicle"${sc === 'vehicle' ? ' checked' : ''}> к ТС ${tr}</label>` +
@@ -93,8 +92,7 @@
     body += field('Стоянка на каждой остановке',
       `<select id="m-cut">${[5, 10, 15].map((x) => `<option value="${x}"${x === cut ? ' selected' : ''}>короче на ${x} с</option>`).join('')}</select>`,
       'по данным обычная стоянка — 14 с (медиана), у 90% остановок не дольше 35 с');
-    body += `<label class="m-check"><input type="checkbox" id="m-layover"${lay ? ' checked' : ''}> Сократить отстой на конечной до 2 мин</label>`;
-    return { body, ok: true, params: { scope: sc, cut_s: cut, short_layover: lay } };
+    return { body, ok: true, params: { scope: sc, cut_s: cut, short_layover: false } };
   }
 
   function render() {
@@ -117,9 +115,19 @@
   const available = () => App && App.src.kind === 'api';
   const same = (a, b) => String(a) === String(b);
 
-  /** Действующие меры по данным backend (обновляются каждым опросом). */
+  let localMeasures = []; // локальные (демо) — вне snapshot, иначе пропадают при опросе
+
+  /** Действующие меры: локальные (демо) + от backend, если есть. */
   function list() {
-    return (App.snap && App.snap.measures) || [];
+    const backend = (App.snap && App.snap.measures) || [];
+    const seen = new Set();
+    const merged = [];
+    for (const m of [...localMeasures, ...backend]) {
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      merged.push(m);
+    }
+    return merged;
   }
 
   async function apply() {
@@ -135,32 +143,46 @@
           m = await App.src.send('POST', '/whatif/reserve',
             { tr_id: String(tr), ready_min: +$('m-ready').value, start_visit_id: visits.id ? visits.id[k0] : null });
         } else {
-          // Демо-режим без backend: создаём локальную меру, чтобы показать работу диспетчера.
           const name0 = stopName(visits, k0);
           const k1 = state.plan.k1;
+          const stop0 = App.net.stops.get(visits.stop[k0]);
+          const depT = visits.plan[k0];
+          const depIso = new Date(depT * 1000).toISOString();
           m = { id: Date.now() % 1e9, kind: 'reserve', tr_id: tr, virtual_tr_id: `7${tr}`,
-                start: { stop_name: name0, time: new Date(visits.plan[k0] * 1000).toISOString() },
-                state: 'к точке выхода', text: `Демо: резерв ТС ${tr} выйдет с «${name0}» и пройдёт рейс по графику`, stops: k1 - k0 + 1 };
+                start: { stop_name: name0, lat: stop0 ? stop0.lat : null, lon: stop0 ? stop0.lon : null,
+                         time: depIso, departure_s: depT },
+                state: 'к точке выхода', text: `Резерв ТС ${tr} выйдет в ${U.time(depT)} с «${name0}» и пройдёт рейс по графику`, stops: k1 - k0 + 1 };
         }
         App.logEvent('info', `Выпущен дополнительный автобус ${m.virtual_tr_id} на линию ТС ${tr}. ${m.text}`);
-        toast(`<b>Выпущен дополнительный автобус · ТС ${m.virtual_tr_id}</b><br>${U.esc(m.text)}`, 'ok', 12000);
+        toast(`<b>Выпущен дополнительный автобус · ТС ${m.virtual_tr_id}</b><br>${U.esc(m.text)}`, 'ok', 2000);
       } else {
-        const params = state.params || { scope: 'vehicle', cut_s: 10, short_layover: true };
+        const params = state.params || { scope: 'vehicle', cut_s: 10, short_layover: false };
         if (live) {
           m = await App.src.send('POST', '/whatif/dwell', { tr_id: String(tr), ...params });
         } else {
-          // Демо-режим: локальная мера с оценкой эффекта по прогнозу.
+          const visits2 = App.src.schedule(tr);
           const p = App.snap && App.snap.predictions.get(tr);
-          const d = p ? p.prediction_delay_s : null;
+          const rows = [];
+          if (visits2) {
+            const dataNow = (App.snap && App.snap.dataNow != null) ? App.snap.dataNow : App.now;
+            const pr = App._progress(visits2, p, App.now, dataNow);
+            const last = pr ? pr.last : -1;
+            for (let k = last + 1; k < Math.min(visits2.plan.length, last + 8); k++) {
+              const delayS = Math.max(0, visits2.plan[k] - dataNow);
+              rows.push({ visit_id: visits2.id[k], time_plan: new Date(visits2.plan[k] * 1000).toISOString(),
+                          delay_s: delayS, delay_measure_s: Math.max(0, delayS - params.cut_s) });
+            }
+          }
           m = { id: Date.now() % 1e9, kind: 'dwell', tr_id: tr, scope: params.scope, cut_s: params.cut_s,
-                short_layover: params.short_layover,
-                text: d != null ? `Демо: сокращение стоянок на ${params.cut_s} с по ТС ${tr} (прогноз ${U.delay(d)})` : `Демо: сокращение стоянок на ${params.cut_s} с по ТС ${tr}` };
+                short_layover: params.short_layover, vehicles: [{ tr_id: tr, rows }],
+                text: `Сокращение стоянок на ${params.cut_s} с по ТС ${tr}${rows.length ? `: ${rows[0].delay_s} с → ${rows[0].delay_measure_s} с` : ''}` };
         }
         const who = m.scope === 'route' ? `вся линия ТС ${tr}` : `ТС ${tr}`;
-        App.logEvent('info', `Сокращены стоянки (${who}, −${m.cut_s} с${m.short_layover ? ', отстой 2 мин' : ''}): ${m.text}`);
-        toast(`<b>Сокращены стоянки · ${U.esc(who)}</b><br>${U.esc(m.text || 'эффект появится, когда будет прогноз')}`, 'info', 12000);
+        App.logEvent('info', `Сокращены стоянки (${who}, −${m.cut_s} с): ${m.text}`);
+        toast(`<b>Сокращены стоянки · ${U.esc(who)}</b><br>${U.esc(m.text || 'эффект появится, когда будет прогноз')}`, 'info', 2000);
       }
-      if (App.snap) App.snap.measures = [...list(), m];
+      m.applied_at = App.now;
+      localMeasures = [...localMeasures, m];
       $('measure-dlg').close();
       App.dirty = true;
     } catch (e) {
@@ -195,13 +217,13 @@
     const m = list().find((x) => x.id === id);
     try {
       if (App.src.kind === 'api') await App.src.send('DELETE', `/whatif/${id}`);
-      if (App.snap) App.snap.measures = list().filter((x) => x.id !== id);
+      localMeasures = localMeasures.filter((x) => x.id !== id);
       const what = m && m.kind === 'reserve' ? `резерв ${m.virtual_tr_id} снят с линии` : 'сокращение стоянок отменено';
       App.logEvent('info', `Мера отменена: ${what}`);
-      toast(`Мера отменена: ${U.esc(what)}`, 'info', 5000);
+      toast(`Мера отменена: ${U.esc(what)}`, 'info', 2000);
       App.dirty = true;
     } catch (e) {
-      toast(`Не удалось отменить меру: ${U.esc(e.message || e)}`, 'info', 6000);
+      toast(`Не удалось отменить меру: ${U.esc(e.message || e)}`, 'info', 2000);
     }
   }
 

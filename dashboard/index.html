@@ -61,6 +61,15 @@
           <div class="demo-hint">Пробел — пауза, ← / → — ±5 мин</div>
         </div>
       </div>
+      <div class="bell-wrap">
+        <button class="ghost iconbtn bell-btn" id="btn-bell" aria-expanded="false" title="Уведомления диспетчера">
+          🔔<span class="bell-badge" id="bell-badge" hidden>0</span>
+        </button>
+        <div class="bell-pop" id="bell-pop" hidden>
+          <div class="bell-head">Уведомления диспетчера</div>
+          <div class="bell-list" id="bell-list"></div>
+        </div>
+      </div>
       <button class="ghost" id="btn-theme" title="Светлая / тёмная тема">Тема</button>
     </div>
   </header>

@@ -142,8 +142,24 @@
   function logEvent(kind, text, t) {
     App.events.unshift({ t: t != null ? t : App.now, wall: Date.now(), kind, text });
     if (App.events.length > 1000) App.events.pop();
+    if (App.renderBell) App.renderBell();
   }
   App.logEvent = logEvent;
+
+  const NOTIFY_KEYWORDS = ['Выпущен', 'Сокращены', 'Мера отменена', 'Сообщение отправлено', 'Диспетчер взял'];
+  const notifyIcon = (text) =>
+    text.includes('Сообщение') ? '💬' : text.includes('Выпущен') ? '🚌' : text.includes('Сокращены') ? '⏱' : text.includes('Мера отменена') ? '↩️' : '🔔';
+  function renderBell() {
+    const evs = App.events.filter((e) => NOTIFY_KEYWORDS.some((k) => e.text.includes(k))).slice(0, 50);
+    const badge = $('bell-badge'), list = $('bell-list');
+    badge.hidden = evs.length === 0;
+    badge.textContent = evs.length > 99 ? '99+' : String(evs.length);
+    list.innerHTML = evs.length
+      ? evs.map((e) => `<div class="bell-item"><span class="be-ic">${notifyIcon(e.text)}</span>` +
+        `<span class="be-body"><div class="be-text">${U.esc(e.text)}</div><div class="be-time">${U.time(e.t, true)}</div></div></span></div>`).join('')
+      : `<div class="bell-empty">Пока нет уведомлений</div>`;
+  }
+  App.renderBell = renderBell;
 
   /** Точка «связь и свежесть данных» не чаще раза в 5 с модельного времени; при перемотке назад лог сбрасывается. */
   function sampleLink(s) {
@@ -308,6 +324,10 @@
     $('btn-demo').onclick = (e) => { e.stopPropagation(); openDemo(pop.hidden); };
     document.addEventListener('click', (e) => { if (!pop.hidden && !e.target.closest('.demo-wrap')) openDemo(false); });
 
+    const bpop = $('bell-pop');
+    $('btn-bell').onclick = (e) => { e.stopPropagation(); renderBell(); bpop.hidden = !bpop.hidden; $('btn-bell').setAttribute('aria-expanded', String(!bpop.hidden)); };
+    document.addEventListener('click', (e) => { if (!bpop.hidden && !e.target.closest('.bell-wrap')) bpop.hidden = true; });
+
     $('btn-play').onclick = togglePlay;
     document.querySelectorAll('#speed button').forEach((b) => (b.onclick = () => {
       setSpeed(+b.dataset.speed);
@@ -361,6 +381,8 @@
       if (ms) { window.Measures.open(ms.dataset.measure, +ms.dataset.tr); return; }
       const mc = e.target.closest('[data-cancel-measure]');
       if (mc) { window.Measures.cancel(+mc.dataset.cancelMeasure); return; }
+      const trk = e.target.closest('[data-track]');
+      if (trk) { select(+trk.dataset.track); App.tab = 'attention'; return; }
       const drv = e.target.closest('[data-driver]');
       if (drv) { showDriverDialog(drv.dataset.tr, drv.dataset.inc); return; }
       const ack = e.target.closest('[data-ack]');
@@ -417,6 +439,10 @@
         pts = App.net.sectionPath(App.sel, visits, i, j, v && v.route_pattern_id);
       }
       if (v) pts.push([v.lat, v.lon]);
+      const reserve = !v ? (window.Measures.reserveOf(tr) || null) : null;
+      if (reserve && reserve.start && reserve.start.lat != null && reserve.start.lon != null) {
+        pts.push([reserve.start.lat, reserve.start.lon]);
+      }
       // Приближаем после открытия нижней панели, иначе участок уйдёт за её край.
       setTimeout(() => { App.dmap.resize(); App.dmap.focus(pts); }, 120);
     }
@@ -617,7 +643,9 @@
     }
     const onMap = new Set(list.map((x) => String(x.tr)));
     for (const m of window.Measures.list()) {
-      if (m.kind !== 'reserve' || !m.start || m.start.lat == null || onMap.has(String(m.virtual_tr_id))) continue;
+      const exitT = m.start && m.start.time != null ? U.ts(m.start.time) : null;
+      if (m.kind !== 'reserve' || !m.start || m.start.lat == null ||
+          (exitT != null && exitT <= App.now) || onMap.has(String(m.virtual_tr_id))) continue;
       list.push({ tr: m.virtual_tr_id, lat: m.start.lat, lon: m.start.lon, html: ghostHtml(m), sel: false, big: true, clickable: true, z: 14 });
     }
     dm.setVehicles(list);
@@ -732,8 +760,8 @@
     const Ms = window.Measures;
     if (Ms.reserveOf(tr)) return ''; // сам резервный автобус
     // Кнопки всегда активны: в live применяют меру через backend, в replay — демо-режим (без сервера).
-    return `<button class="ghost sm" data-measure="reserve" data-tr="${tr}" title="Резервный автобус возьмёт рейс с ближайшей остановки, к которой успевает">＋ Доп. автобус</button>` +
-      `<button class="ghost sm" data-measure="dwell" data-tr="${tr}" title="Короче стоянки на остановках и отстой на конечной">Сократить стоянки</button>`;
+    return `<button class="mb" data-measure="reserve" data-tr="${tr}" title="Резервный автобус возьмёт рейс с ближайшей остановки, к которой успевает">＋ Доп. автобус</button>` +
+      `<button class="mb" data-measure="dwell" data-tr="${tr}" title="Короче стоянки на остановках и отстой на конечной">Сократить стоянки</button>`;
   }
 
   function measureChips(tr) {
@@ -815,7 +843,7 @@
     $('d-send').onclick = () => {
       const tr = dlg.dataset.tr;
       logEvent('info', `Сообщение отправлено водителю ТС ${tr}`);
-      if (window.Measures && window.Measures.toast) window.Measures.toast(`<b>Сообщение отправлено водителю ТС ${tr}</b>`, 'ok', 6000);
+      if (window.Measures && window.Measures.toast) window.Measures.toast(`<b>Сообщение отправлено водителю ТС ${tr}</b>`, 'ok', 2000);
       dlg.close();
     };
   }
@@ -881,7 +909,35 @@
     let html = todo.length ? todo.map(attentionCard).join('')
       : `<div class="empty">${U.sevIcon('ok', 22)}<br>Сейчас ничего не требует внимания.<br>Все ТС идут по графику.</div>`;
     if (work.length) html += `<div class="section-title">В работе · ${work.length}</div>` + work.map(workRow).join('');
+    html += renderMeasuresPanel();
     if (html !== App.html.att) { App.html.att = html; $('tab-attention').innerHTML = html; }
+  }
+
+  /** Панель применённых диспетчером мер: клик по записи приближает к ТС/резерву на карте. */
+  function renderMeasuresPanel() {
+    const ms = window.Measures.list();
+    if (!ms.length) return '';
+    const rows = ms.map((m) => {
+      const t = m.applied_at != null ? U.time(m.applied_at) : '';
+      const timeHtml = t ? `<span class="m-time">${t}</span>` : '';
+      if (m.kind === 'reserve') {
+        const name = m.start && m.start.stop_name ? U.esc(m.start.stop_name) : '';
+        const exitT = m.start && m.start.time != null ? U.ts(m.start.time) : null;
+        const state = (exitT != null && exitT <= App.now) ? 'в пути · на линии' : (m.state || 'к точке выхода');
+        const dep = m.start && m.start.departure_s != null ? ` · отправление ${U.time(m.start.departure_s)}` : '';
+        return `<div class="mrow reserve" data-track="${m.virtual_tr_id}" title="Показать резерв на карте">` +
+          `<span class="m-ic">🚌</span><span class="m-main"><span class="m-t">Резерв ТС ${m.tr_id} · с «${name}»</span>` +
+          `<span class="m-sub">${U.esc(state)}${dep}${timeHtml ? ` · ${timeHtml}` : ''}</span></span></div>`;
+      }
+      const who = m.scope === 'route' ? `линия ${m.tr_id}` : `ТС ${m.tr_id}`;
+      const v = (m.vehicles || [])[0];
+      const eff = v && v.target
+        ? ` · ${U.delay(v.target.delay_s)} → ${U.delay(v.target.delay_measure_s)}` : '';
+      return `<div class="mrow dwell" data-track="${m.tr_id}" title="Показать ТС и остановки с сокращённой стоянкой на карте">` +
+        `<span class="m-ic">⏱</span><span class="m-main"><span class="m-t">Сокращение стоянок · ${U.esc(who)} (−${m.cut_s} с)</span>` +
+        `<span class="m-sub">${U.esc(eff)}${timeHtml ? ` · ${timeHtml}` : ''}</span></span></div>`;
+    }).join('');
+    return `<div class="section-title">Применённые меры · ${ms.length} <span class="muted">(клик — показать на карте)</span></div>` + rows;
   }
 
   function renderRoutes(s) {
