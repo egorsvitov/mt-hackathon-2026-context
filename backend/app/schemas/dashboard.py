@@ -43,6 +43,7 @@ class Route(BaseModel):
     speed_norm_kmh: float | None = None
     stops: list[int]
     segments: list[RouteSegment]
+    reserve_of: TrId | None = Field(None, description="Резервный автобус линии этого ТС (мера диспетчера)")
 
 
 class Network(BaseModel):
@@ -80,6 +81,7 @@ class Vehicle(BaseModel):
     route_pattern_id: str | None = None
     position_quality: str | None = None
     off_route: bool | None = None
+    reserve_of: TrId | None = Field(None, description="Резервный автобус, выпущенный на линию этого ТС")
 
 
 class Reason(BaseModel):
@@ -127,6 +129,8 @@ class Prediction(BaseModel):
     reason: Reason | None = None
     evidence: list[Evidence] = []
     recommendation: str | None = None
+    speed_required_kmh: float | None = None
+    trip_priority: Literal["first", "mid", "last"] | None = None
 
 
 class Incident(BaseModel):
@@ -156,6 +160,8 @@ class Incident(BaseModel):
     alert_target_stop_name: str | None = None
     alert_target_time_begin: datetime | None = None
     outcome_delay_s: float | None = None
+    speed_required_kmh: float | None = None
+    trip_priority: Literal["first", "mid", "last"] | None = None
 
 
 class Verified(BaseModel):

@@ -74,6 +74,10 @@ ML-модуль ──(prediction_delay_s, late_probability)──► Backend �
 | GET | `/health/live`, `/health/ready` | статус | для Docker healthcheck |
 | POST | `/stream/telemetry` | приём записи телеметрии (`RawNDTPRecord`) от NDTP-парсера | — |
 | POST | `/demo/start?t=ЧЧ:ММ&speed=`, `/demo/speed?speed=`, `/demo/stop`, `/demo/link?down=` | управление воспроизведением CSV в backend (дашборд вызывает из шапки) | по действию |
+| GET | `/whatif` | действующие меры диспетчера с эффектом на текущий момент (пересчёт по свежим прогнозам) | раз в 2 с |
+| POST | `/whatif/reserve` `{tr_id, ready_min, start_visit_id?}` | выпустить дополнительный автобус: берёт рейс ТС с остановки, к которой успевает, идёт по графику; в `/vehicles` появляется ТС с `reserve_of`, в `/network` — его маршрут | по действию |
+| POST | `/whatif/dwell` `{tr_id, scope: vehicle\|route, cut_s, short_layover}` | сократить стоянки (и отстой на конечной): по остановкам впереди опоздание `delay_s` «как есть» и `delay_measure_s` «с мерой» | по действию |
+| DELETE | `/whatif/{id}` | отменить меру, резерв снимается с линии | по действию |
 
 ## Объекты
 

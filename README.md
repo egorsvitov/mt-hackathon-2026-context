@@ -59,6 +59,7 @@ docker compose --profile emulator up -d          # API эмулятора: http:
 отметки отбрасываются как «из будущего» (`rejected_future` в `/metrics`), чтобы не ломать
 воспроизводимый день.
 
+## Локальные данные
 ### Как использовать Swagger (API Документация)
 
 Swagger UI ([http://localhost:18000/docs](http://localhost:18000/docs)) предоставляет интерактивный веб-интерфейс для нашего API бэкенда.

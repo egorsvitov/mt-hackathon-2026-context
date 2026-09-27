@@ -116,7 +116,8 @@
   class Network {
     constructor(raw) {
       this.stops = new Map(raw.stops.map((s) => [s.stop_key, s]));
-      this.routes = raw.routes.slice().sort((a, b) => a.tr_id - b.tr_id);
+      // Резервные автобусы (мера диспетчера) — не отдельные маршруты: линия та же, что у основного ТС.
+      this.routes = raw.routes.filter((r) => r.reserve_of == null).sort((a, b) => a.tr_id - b.tr_id);
       this.routeByTr = new Map(this.routes.map((r) => [r.tr_id, r]));
       this.seg = new Map();
       for (const r of this.routes) {
@@ -128,8 +129,18 @@
         }
         this.seg.set(r.tr_id, patterns);
       }
+      for (const r of raw.routes) if (r.reserve_of != null) this.addReserve(r);
     }
     stopName(key) { const s = this.stops.get(key); return s ? s.name : '—'; }
+
+    /** Маршрут резервного автобуса (мера диспетчера): доступен по tr_id, но не входит в список
+        маршрутов — линия та же, что у основного ТС, и уже нарисована. */
+    addReserve(r) {
+      if (this.routeByTr.has(r.tr_id)) return;
+      this.routeByTr.set(r.tr_id, r);
+      const patterns = new Map([['', new Map(r.segments.map((s) => [`${s.from}-${s.to}`, s]))]]);
+      this.seg.set(r.tr_id, patterns);
+    }
 
     /** Отдельные дорожные полилинии между посещениями i..j для одного паттерна. */
     sectionPaths(tr, visits, i, j, routePatternId = null) {
