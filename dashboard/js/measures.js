@@ -163,19 +163,33 @@
           const visits2 = App.src.schedule(tr);
           const p = App.snap && App.snap.predictions.get(tr);
           const rows = [];
-          if (visits2) {
+          if (visits2 && p) {
             const dataNow = (App.snap && App.snap.dataNow != null) ? App.snap.dataNow : App.now;
             const pr = App._progress(visits2, p, App.now, dataNow);
             const last = pr ? pr.last : -1;
+            const ti = p.target_stop_id != null ? (visits2.pos ? visits2.pos.get(p.target_stop_id) : null) : null;
+            const tIdx = ti == null ? -1 : ti;
+            const c0 = p.cur_dev_s != null ? p.cur_dev_s : 0;
+            // «Как есть» — ожидаемая задержка на остановке по прогнозу модели (как expectedDelay в app.js),
+            // «с мерой» — меньше на cut_s (не ниже 0). Так уведомление не показывает ложное «0 с → 0 с».
             for (let k = last + 1; k < Math.min(visits2.plan.length, last + 8); k++) {
-              const delayS = Math.max(0, visits2.plan[k] - dataNow);
+              let d;
+              if (tIdx < 0) d = c0;
+              else if (k >= tIdx) d = p.prediction_delay_s;
+              else {
+                const f = (visits2.plan[k] - App.now) / Math.max(1, visits2.plan[tIdx] - App.now);
+                d = c0 + (p.prediction_delay_s - c0) * Math.max(0, Math.min(1, f));
+              }
+              const delayS = Math.max(0, Math.round(d));
               rows.push({ visit_id: visits2.id[k], time_plan: new Date(visits2.plan[k] * 1000).toISOString(),
                           delay_s: delayS, delay_measure_s: Math.max(0, delayS - params.cut_s) });
             }
           }
+          const effText = rows.length
+            ? `${rows[0].delay_s} с → ${rows[0].delay_measure_s} с` : 'эффект появится, когда будет прогноз';
           m = { id: Date.now() % 1e9, kind: 'dwell', tr_id: tr, scope: params.scope, cut_s: params.cut_s,
                 short_layover: params.short_layover, vehicles: [{ tr_id: tr, rows }],
-                text: `Сокращение стоянок на ${params.cut_s} с по ТС ${tr}${rows.length ? `: ${rows[0].delay_s} с → ${rows[0].delay_measure_s} с` : ''}` };
+                text: `Сокращение стоянок на ${params.cut_s} с по ТС ${tr}: ${effText}` };
         }
         const who = m.scope === 'route' ? `вся линия ТС ${tr}` : `ТС ${tr}`;
         App.logEvent('info', `Сокращены стоянки (${who}, −${m.cut_s} с): ${m.text}`);
