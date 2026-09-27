@@ -210,6 +210,34 @@ def _load_events(events_dir: Path, split: str):
     return run, dwell
 
 
+def _purge_validate_trip_overlap(train, run_events, dwell_events, validate):
+    known = set(validate.loc[validate["mm_trip_occurrence_id"] != "__unknown__", "mm_trip_occurrence_id"].astype(str))
+    unknown_tr_ids = set(validate.loc[validate["mm_trip_occurrence_id"] == "__unknown__", "tr_id"].astype(int))
+
+    def filtered(frame, trip_column):
+        trips = frame[trip_column].astype(str)
+        keep = ~trips.isin(known)
+        if unknown_tr_ids:
+            keep &= ~frame["tr_id"].astype(int).isin(unknown_tr_ids)
+        return frame[keep]
+
+    filtered_train = filtered(train, "mm_trip_occurrence_id")
+    filtered_run = filtered(run_events, "trip_occurrence_id")
+    filtered_dwell = filtered(dwell_events, "trip_occurrence_id")
+    report = {
+        "purged_trip_occurrences": len(known),
+        "fallback_tr_ids": sorted(unknown_tr_ids),
+        "train_rows_removed": len(train) - len(filtered_train),
+        "run_events_removed": len(run_events) - len(filtered_run),
+        "dwell_events_removed": len(dwell_events) - len(filtered_dwell),
+    }
+    return (
+        filtered_train.reset_index(drop=True),
+        filtered_run.reset_index(drop=True),
+        filtered_dwell.reset_index(drop=True),
+        report,
+    )
+
 def _fit_evaluation(source, test, run_events, dwell_events, catalog, spec):
     if spec.use_components:
         source, test, run_bundle, dwell_bundle = _enrich(
@@ -232,8 +260,12 @@ def run_training(
     artifacts,
     *,
     final_train_only: bool = False,
+    purge_validate_trips: bool = False,
 ) -> dict:
     artifacts.mkdir(parents=True, exist_ok=True)
+    if purge_validate_trips and not final_train_only:
+        raise ValueError("--purge-validate-trips requires --final-train-only")
+
     catalog = Catalog.load(catalog_path)
     train = pd.read_parquet(cache / "train.parquet")
     real_train = train[train["is_real_train_vehicle"]].reset_index(drop=True)
@@ -324,6 +356,14 @@ def run_training(
         )
         final_phase = "train_plus_test_to_validate"
         final_training_split = "train+test"
+    purge_report = None
+    if purge_validate_trips:
+        combined, all_run, all_dwell, purge_report = _purge_validate_trip_overlap(
+            combined, all_run, all_dwell, validate
+        )
+        final_phase = "train_purged_trips_to_validate"
+        final_training_split = "train_purged_validate_trips"
+
     if selected_spec.use_components:
         combined, validate, final_run, final_dwell = _enrich(
             combined, validate, all_run, all_dwell, catalog, selected_spec.use_experts, None
@@ -339,6 +379,8 @@ def run_training(
             "use_synthetic_training": use_synthetic,
             "final_training_split": final_training_split,
             "uses_test_for_final_training": not final_train_only,
+            "purge_validate_trips": purge_validate_trips,
+            "purge_report": purge_report,
             "python": platform.python_version(),
             "catboost": catboost.__version__,
         },
@@ -373,6 +415,8 @@ def run_training(
         "final_train_only": final_train_only,
         "final_training_split": final_training_split,
         "uses_test_for_final_training": not final_train_only,
+        "purge_validate_trips": purge_validate_trips,
+        "purge_report": purge_report,
         "final_training_rows": len(combined),
         "submission_rows": len(submission),
     }

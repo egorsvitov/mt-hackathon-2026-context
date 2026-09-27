@@ -12,3 +12,4 @@ artifacts/modeling/test_predictions.csv
 artifacts/modeling/submission.csv
 
 artifacts/modeling_train_only/
+artifacts/modeling_purged_trip/

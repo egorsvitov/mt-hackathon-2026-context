@@ -24,6 +24,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="fit the validate submission model and component models without test data",
     )
+    training.add_argument(
+        "--purge-validate-trips",
+        action="store_true",
+        help="remove validate trip occurrences from final train rows and component events",
+    )
     evaluation = commands.add_parser("evaluate")
     evaluation.add_argument(
         "--model-dir", type=Path, default=Path("artifacts/modeling/evaluation_model")
@@ -49,6 +54,7 @@ def main() -> None:
             args.events_dir,
             args.artifacts_dir,
             final_train_only=args.final_train_only,
+            purge_validate_trips=args.purge_validate_trips,
         )
     elif args.command == "evaluate":
         result = evaluate(args.cache_dir, args.model_dir)

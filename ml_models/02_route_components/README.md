@@ -32,6 +32,17 @@ uv run delay-v2 \
   train --final-train-only
 ```
 
+Для purged-trip эксперимента дополнительно исключаются train-строки и component events тех
+же рейсов, которые представлены в validate; неизвестный рейс исключается целиком по `tr_id`:
+
+```bash
+uv run delay-v2 \
+  --artifacts-dir artifacts/modeling_purged_trip \
+  train --final-train-only --purge-validate-trips
+```
+
+
+
 
 Можно передать пути явно через `--data-dir` и `--catalog`. `prepare` занимает несколько минут:
 HMM причинно проигрывает телеметрию до каждой прогнозной точки.

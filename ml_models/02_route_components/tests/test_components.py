@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from route_delay_v2.components import fit_component
+from route_delay_v2.workflow import _purge_validate_trip_overlap
 
 
 def run_events(count=20):
@@ -43,3 +44,35 @@ def test_component_bundle_roundtrip(tmp_path):
     predicted, _ = restored.predict(run_events().iloc[:3])
     assert np.allclose(before, predicted)
 
+
+def test_purge_validate_trip_overlap_filters_rows_and_events():
+    train = pd.DataFrame(
+        {
+            "sample_id": ["keep", "purged", "fallback"],
+            "tr_id": [1, 2, 9],
+            "mm_trip_occurrence_id": ["keep", "validate-trip", "other-trip"],
+        }
+    )
+    events = pd.DataFrame(
+        {
+            "event_id": ["keep", "purged", "fallback"],
+            "tr_id": [1, 2, 9],
+            "trip_occurrence_id": ["keep", "validate-trip", "other-trip"],
+        }
+    )
+    validate = pd.DataFrame(
+        {
+            "tr_id": [2, 9],
+            "mm_trip_occurrence_id": ["validate-trip", "__unknown__"],
+        }
+    )
+
+    filtered_train, filtered_run, filtered_dwell, report = _purge_validate_trip_overlap(
+        train, events, events, validate
+    )
+
+    assert filtered_train["sample_id"].tolist() == ["keep"]
+    assert filtered_run["event_id"].tolist() == ["keep"]
+    assert filtered_dwell["event_id"].tolist() == ["keep"]
+    assert report["purged_trip_occurrences"] == 1
+    assert report["fallback_tr_ids"] == [9]
