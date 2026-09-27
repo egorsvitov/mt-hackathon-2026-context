@@ -1,5 +1,6 @@
-/* Источник данных от backend: раз в 2 секунды опрашивает API.
-   Если связь пропала, показываем последнее полученное состояние и предупреждаем об этом. */
+/* Источник данных LIVE: опрос backend по контракту (CONTRACT.md).
+   Включается параметром ?api=http://localhost:8000. При ошибках связи держит
+   последнее полученное состояние и сообщает об этом (деградация без падения). */
 (function () {
   'use strict';
 
@@ -23,16 +24,16 @@
       this.lastOk = null;
       this.error = null;
       this.verified = [];
-      this.speedBuf = new Map();
-      this.fcBuf = new Map(); // tr -> прогнозы по целевым остановкам
-      this.sched = new Map();
-      // история для аналитики и журнала копится с момента открытия страницы
-      this.predLog = new Map();
-      this.incLog = new Map();
+      this.speedBuf = new Map(); // tr -> [[t, speed]]
+      this.fcBuf = new Map(); // tr -> Map(target_stop_id -> [target_time, pred, as_of])
+      this.sched = new Map(); // tr -> {data, fetchedAt}
+      // История для «Аналитики» и «Журнала»: копится с момента открытия страницы,
+      // сверенные с фактом прогнозы backend отдаёт целиком (/predictions/verified?all=true).
+      this.predLog = new Map(); // sample_id -> запись
+      this.incLog = new Map(); // incident_id -> запись
       this.hist = { t: [], critical: [], warning: [], early: [], ok: [], packets: [], latency: [] };
     }
 
-    /** GET к API с таймаутом 5 секунд. */
     async get(path) {
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 5000);
@@ -45,9 +46,29 @@
       }
     }
 
-    /** Загружает сеть и настройки и запускает регулярный опрос. */
+    /** POST/DELETE к backend (меры диспетчера); ошибка — с текстом detail из ответа. */
+    async send(method, path, body) {
+      const r = await fetch(this.base + path, {
+        method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : `HTTP ${r.status}`);
+      return data;
+    }
+
+    /** Резервные автобусы появляются в /vehicles раньше, чем их маршрут у дашборда. */
+    async loadReserveRoutes() {
+      if (this.reserveFetch) return;
+      this.reserveFetch = true;
+      try {
+        const net = await this.get('/network');
+        for (const r of net.routes) if (r.reserve_of != null) this.network.addReserve(r);
+      } catch (e) { /* повторим на следующем опросе */ }
+      this.reserveFetch = false;
+    }
+
     async init() {
-      // без сети карту не нарисовать, поэтому пробуем несколько раз
+      // Сеть нужна для карты — без неё стартовать нельзя, повторяем до успеха.
       for (let attempt = 0; ; attempt++) {
         try {
           this.network = new Network(await this.get('/network'));
@@ -63,6 +84,7 @@
         if (cfg.thresholds) this.meta.thresholds = this.thr = cfg.thresholds;
         Object.assign(this.meta.model, cfg.model || {});
         if (cfg.replay) {
+          // Backend воспроизводит исторический день — дашборд может им управлять.
           this.replayInfo = cfg.replay;
           this.meta.day_start = U.ts(cfg.replay.day_start);
           this.meta.day_end = U.ts(cfg.replay.day_end);
@@ -74,7 +96,6 @@
       this.pollVerified();
     }
 
-    /** Один опрос backend: ТС, прогнозы, инциденты, метрики и меры. */
     async poll() {
       try {
         const [veh, preds, incs, met] = await Promise.all(
@@ -110,8 +131,11 @@
           if (!i.prediction_status) i.prediction_status = (predictions.get(i.tr_id) || {}).status;
           return i;
         });
+        let measures = this.last ? this.last.measures : [];
+        try { measures = await this.get('/whatif'); } catch (e) { /* backend без мер — остаются прежние */ }
+        if (vehicles.some((v) => v.reserve_of != null && !this.network.routeByTr.has(v.tr_id))) this.loadReserveRoutes();
         this.remember(now, predictions, incidents, metrics);
-        this.last = { now, dataNow: now, down: false, vehicles, predictions, incidents, metrics };
+        this.last = { now, dataNow: now, down: false, vehicles, predictions, incidents, metrics, measures };
         this.lastOk = Date.now() / 1000;
         this.error = null;
       } catch (e) {
@@ -119,7 +143,8 @@
       }
     }
 
-    /** Сбрасывает накопленную историю, когда backend начал воспроизведение заново. */
+    /** Воспроизведение в backend началось заново (перемотка, новый круг дня): история страницы
+        относится к прежней линии времени — сбрасываем её, иначе аналитика перестаёт копиться. */
     resetHistory() {
       this.predLog.clear();
       this.incLog.clear();
@@ -131,10 +156,9 @@
       this.restarts = (this.restarts || 0) + 1;
     }
 
-    /** Догружает новые сверенные с фактом прогнозы. */
     async pollVerified() {
-      // За день сверенных прогнозов десятки тысяч, поэтому забираем только новые:
-      // их число знаем по n_verified из /metrics, берём с небольшим запасом.
+      // Сверенных прогнозов за день — десятки тысяч: забираем только новые (по счётчику
+      // n_verified из /metrics) с небольшим запасом, а не весь список каждые 10 с.
       const n = this.last && this.last.metrics ? this.last.metrics.n_verified : null;
       if (n == null) return;
       const fresh = this.verifiedN == null || n < this.verifiedN ? 20000 : n - this.verifiedN;
@@ -159,7 +183,6 @@
       } catch (e) { /* эндпоинт необязателен */ }
     }
 
-    /** Прогноз в виде записи журнала. */
     toRec(p, key) {
       const pred = p.prediction_delay_s;
       return {
@@ -170,7 +193,7 @@
       };
     }
 
-    /** Запоминает прогнозы, инциденты и метрики для истории страницы. */
+    /** Запомнить прогнозы, инциденты и метрики для истории. */
     remember(now, predictions, incidents, metrics) {
       for (const p of predictions.values()) {
         const key = p.sample_id || `${p.tr_id}_${p.as_of}`;
@@ -190,7 +213,7 @@
         });
       }
       const h = this.hist;
-      if (h.t.length && now - h.t[h.t.length - 1] < 30) return;
+      if (h.t.length && now - h.t[h.t.length - 1] < 30) return; // точка не чаще раза в 30 с
       const c = { critical: 0, warning: 0, early: 0, ok: 0 };
       for (const p of predictions.values()) if (c[p.severity] != null) c[p.severity]++;
       h.t.push(now);
@@ -212,16 +235,15 @@
       return this.hist;
     }
 
-    /** Текущее время системы по часам backend. */
     clock() {
       if (!this.last) return Date.now() / 1000;
-      // часы backend плюс время с последнего ответа с учётом скорости воспроизведения
+      // Часы backend + время с последнего успешного ответа (с учётом скорости воспроизведения).
       const m = this.last.metrics;
       const speed = m.replay_speed != null ? m.replay_speed : 1;
       return m.now ? m.now + (Date.now() / 1000 - this.lastOk) * speed : Date.now() / 1000;
     }
 
-    /** Команда воспроизведению в backend: start, speed, stop или link. */
+    /** Управление воспроизведением в backend: start | speed | stop | link. */
     async control(action, params) {
       const q = new URLSearchParams(params || {}).toString();
       const r = await fetch(`${this.base}/demo/${action}?${q}`, { method: 'POST' });
@@ -230,7 +252,6 @@
       return r.json();
     }
 
-    /** Последнее состояние и признаки, если связь с backend потеряна. */
     snapshot() {
       const base = this.last || { now: Date.now() / 1000, vehicles: [], predictions: new Map(), incidents: [], metrics: {} };
       const lost = this.error && this.lastOk && Date.now() / 1000 - this.lastOk > 5;
@@ -244,7 +265,6 @@
       };
     }
 
-    /** Расписание ТС. Загружается при первом обращении и обновляется раз в 30 секунд. */
     schedule(tr) {
       const c = this.sched.get(tr);
       if (!c || Date.now() - c.fetchedAt > 30000) {
@@ -263,7 +283,6 @@
       return c ? c.data : null;
     }
 
-    /** Ряды для графиков выбранного ТС. */
     history(tr, now) {
       const out = { facts: [], forecasts: [], speed: (this.speedBuf.get(tr) || []).slice() };
       const v = this.schedule(tr);

@@ -11,6 +11,7 @@ from app.api.websocket.dashboard_ws import ws_router
 from app.core.config import settings
 from app.services.pipeline import pipeline
 from app.services.replay import ReplayFeeder
+from app.services.whatif import WhatIf
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -24,6 +25,8 @@ async def lifespan(app: FastAPI):
     pipeline.network.load()
     pipeline.load_spatial()
     pipeline.replay = ReplayFeeder(pipeline)
+    pipeline.whatif = WhatIf(pipeline)
+    pipeline.whatif.start()
     if settings.REPLAY_AUTOSTART and pipeline.network.loaded:
         try:
             pipeline.load_facts(settings.REPLAY_SPLIT)
@@ -31,6 +34,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             log.exception("Replay не запущен — backend работает без потока")
     yield
+    await pipeline.whatif.stop()
     await pipeline.replay.stop()
     pipeline.close()
 

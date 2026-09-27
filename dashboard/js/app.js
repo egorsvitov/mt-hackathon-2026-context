@@ -1,6 +1,7 @@
-/* Дашборд диспетчера: запуск, общее состояние и экран «Диспетчерская».
-   «Аналитика» и «Журнал» лежат в analytics.js и journal.js. Данные идут от backend
-   или из воспроизведения дня в браузере, если backend недоступен. */
+/* Приложение: три экрана — «Диспетчерская» (здесь), «Аналитика» (analytics.js), «Журнал» (journal.js).
+   Источник данных — ReplaySource (по умолчанию) или ApiSource (?api=http://host:8000/api/v1).
+   Диспетчерская показывает только то, что нужно для решения: кто, где, насколько опоздает, почему,
+   что делать. Метрики качества и системы — на «Аналитике», подробности — в «Журнале». */
 (function () {
   'use strict';
 
@@ -16,16 +17,17 @@
     linkDownSince: null, restoredAt: null,
     snap: null, lastTs: 0, lastUi: 0, lastCharts: 0, lastPage: 0, dirty: true, dragging: false,
     colors: {}, html: {},
-    ack: new Map(), // incident_id -> когда взяли в работу
-    expanded: new Set(),
-    events: [],
-    linkLog: [], // для графика связи в аналитике
+    ack: new Map(), // incident_id -> когда диспетчер взял в работу
+    expanded: new Set(), // раскрытые карточки
+    events: [], // журнал событий системы
+    linkLog: [], // связь и свежесть данных по времени (для «Аналитики»): {t, age, down, lag}
     prev: {},
   };
   window.App = App;
   window.Views = window.Views || {};
 
-  /** Показывает ошибку запуска поверх страницы. */
+  // ------------------------------------------------------------------ запуск
+
   function showError(msg) {
     let el = document.querySelector('.err-overlay');
     if (!el) { el = document.createElement('div'); el.className = 'err-overlay'; document.body.appendChild(el); }
@@ -36,7 +38,6 @@
   window.addEventListener('error', (e) => showError(`Ошибка: ${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`));
   window.addEventListener('unhandledrejection', (e) => showError(`Ошибка: ${e.reason && e.reason.message ? e.reason.message : e.reason}`));
 
-  /** Подгружает скрипт и ждёт, пока он выполнится. */
   function loadScript(src) {
     return new Promise((res, rej) => {
       const s = document.createElement('script');
@@ -47,9 +48,8 @@
     });
   }
 
-  /** Запуск: выбирает источник данных, строит карту и экраны. */
   async function boot() {
-    // адрес backend берём из ?api= или config.js, ?replay=1 включает воспроизведение в браузере
+    // Режим: ?api=<url> или config.js (Docker: DASHBOARD_API); ?replay=1 — принудительно воспроизведение.
     const cfg = window.DASH_CONFIG || {};
     const api = params.get('replay') ? null : params.get('api') || cfg.api;
     if (api) {
@@ -58,7 +58,7 @@
         App.src = new ApiSource(api, +params.get('poll') || 2000);
         await App.src.init();
       } catch (e) {
-        // backend недоступен, показываем исторический день
+        // Деградация: backend недоступен — работаем по историческим данным.
         App.fallbackReason = e.message || String(e);
         App.src = null;
         watchBackend(api);
@@ -91,6 +91,8 @@
     initControls();
     initCharts();
     for (const v of Object.values(window.Views)) if (v.init) v.init(App);
+    window.Measures.init(App);
+    initDriverDialog();
     logEvent('ok', App.src.kind === 'api'
       ? `Дашборд подключён к backend (${App.src.base})`
       : `Дашборд запущен в режиме воспроизведения${App.fallbackReason ? ' — backend недоступен' : ''}`);
@@ -105,7 +107,6 @@
     requestAnimationFrame(loop);
   }
 
-  /** Цикл анимации: двигает часы, маркеры и перерисовывает экран. */
   function loop(ts) {
     const dt = App.lastTs ? Math.min((ts - App.lastTs) / 1000, 1) : 0;
     App.lastTs = ts;
@@ -126,7 +127,6 @@
     requestAnimationFrame(loop);
   }
 
-  /** Читает цвета темы из CSS-переменных. */
   function readColors() {
     const v = U.cssVar;
     App.colors = {
@@ -137,14 +137,31 @@
   }
   App.readColors = readColors;
 
-  /** Добавляет событие в журнал системы. */
+  // ------------------------------------------------------------------ события системы (для «Журнала»)
+
   function logEvent(kind, text, t) {
     App.events.unshift({ t: t != null ? t : App.now, wall: Date.now(), kind, text });
     if (App.events.length > 1000) App.events.pop();
+    if (App.renderBell) App.renderBell();
   }
   App.logEvent = logEvent;
 
-  /** Запоминает состояние связи для графика в аналитике, не чаще раза в 5 секунд. */
+  const NOTIFY_KEYWORDS = ['Выпущен', 'Сокращены', 'Мера отменена', 'Сообщение отправлено', 'Диспетчер взял'];
+  const notifyIcon = (text) =>
+    text.includes('Сообщение') ? '💬' : text.includes('Выпущен') ? '🚌' : text.includes('Сокращены') ? '⏱' : text.includes('Мера отменена') ? '↩️' : '🔔';
+  function renderBell() {
+    const evs = App.events.filter((e) => NOTIFY_KEYWORDS.some((k) => e.text.includes(k))).slice(0, 50);
+    const badge = $('bell-badge'), list = $('bell-list');
+    badge.hidden = evs.length === 0;
+    badge.textContent = evs.length > 99 ? '99+' : String(evs.length);
+    list.innerHTML = evs.length
+      ? evs.map((e) => `<div class="bell-item"><span class="be-ic">${notifyIcon(e.text)}</span>` +
+        `<span class="be-body"><div class="be-text">${U.esc(e.text)}</div><div class="be-time">${U.time(e.t, true)}</div></div></span></div>`).join('')
+      : `<div class="bell-empty">Пока нет уведомлений</div>`;
+  }
+  App.renderBell = renderBell;
+
+  /** Точка «связь и свежесть данных» не чаще раза в 5 с модельного времени; при перемотке назад лог сбрасывается. */
   function sampleLink(s) {
     const L = App.linkLog, m = s.metrics || {}, now = App.now;
     const last = L.length ? L[L.length - 1] : null;
@@ -157,7 +174,6 @@
     if (L.length > 5000) L.shift();
   }
 
-  /** Замечает смену состояния системы и новые инциденты и пишет их в журнал. */
   function trackEvents(s) {
     const P = App.prev;
     const down = !!s.down, bdown = !!s.backendDown, ml = s.metrics ? s.metrics.ml_status : undefined;
@@ -189,7 +205,8 @@
     Object.assign(P, { init: true, down, bdown, ml, inc: status });
   }
 
-  /** Экран из адреса страницы. */
+  // ------------------------------------------------------------------ экраны
+
   function viewFromHash() {
     const h = location.hash.replace('#', '');
     if (VIEWS.includes(h)) return h;
@@ -197,7 +214,6 @@
     return 'dispatch';
   }
 
-  /** Переключает экран. */
   function setView(v, silent) {
     App.view = v;
     for (const name of VIEWS) $(`view-${name}`).hidden = name !== v;
@@ -213,9 +229,10 @@
     if (!silent) App.dirty = true;
   }
   App.setView = setView;
+  // До окончания загрузки экран не переключаем: boot сам откроет экран из адреса.
   window.addEventListener('hashchange', () => { if (App.ready) setView(viewFromHash()); });
 
-  /** Если при старте backend не отвечал, проверяем его раз в 5 секунд и предлагаем переключиться. */
+  /** Backend был недоступен при старте: проверяем раз в 5 с и предлагаем переключиться. */
   function watchBackend(api) {
     const timer = setInterval(async () => {
       try {
@@ -229,23 +246,23 @@
     }, 5000);
   }
 
-  /** Открывает ТС на диспетчерской, откуда бы ни пришёл клик. */
+  /** Открыть ТС на диспетчерской (из журнала, аналитики, карты, списка). */
   App.openVehicle = (tr) => {
     if (App.view !== 'dispatch') location.hash = '#dispatch';
     if (App.sel !== tr) select(tr);
   };
 
-  // воспроизведение идёт в backend, управляем им через /demo/*
+  // ------------------------------------------------------------------ управление (кнопка «Демо»)
+
+  // Воспроизведение идёт в backend (режим LIVE поверх CSV replay) — управляем им через /demo/*.
   const apiReplay = () => App.src.kind === 'api' && !!App.src.replayInfo;
 
-  /** Отправляет команду воспроизведению в backend и пишет её в журнал. */
   function control(action, prm, text) {
     if (App.src.kind !== 'api') return;
     if (text) logEvent('info', text);
     App.src.control(action, prm).catch((e) => showError(`Управление воспроизведением: ${e.message || e}`));
   }
 
-  /** Пауза или продолжение воспроизведения. */
   function togglePlay() {
     App.playing = !App.playing;
     syncPlay();
@@ -259,14 +276,12 @@
     b.setAttribute('aria-label', App.playing ? 'Пауза' : 'Пуск');
   }
 
-  /** Меняет скорость воспроизведения. */
   function setSpeed(s) {
     App.speed = s;
     document.querySelectorAll('#speed button').forEach((b) => b.classList.toggle('on', +b.dataset.speed === s));
     if (App.dmap) App.dmap.moveMs = s >= 300 ? 0 : s >= 60 ? 300 : 900;
   }
 
-  /** Перематывает воспроизведение в браузере на момент t. */
   function jump(t) {
     App.now = Math.max(App.meta.day_start, Math.min(App.meta.day_end, t));
     if (App.linkDownSince != null && App.linkDownSince > App.now) App.linkDownSince = App.now;
@@ -274,7 +289,6 @@
     App.dirty = true;
   }
 
-  /** Имитирует обрыв связи или восстанавливает её. */
   function toggleLink() {
     if (apiReplay()) {
       App.apiLinkDown = !App.apiLinkDown;
@@ -295,7 +309,6 @@
     $('btn-link').textContent = down ? 'Восстановить связь' : 'Обрыв связи';
   }
 
-  /** Подключает кнопки, клавиши и клики по карточкам. */
   function initControls() {
     const isReplay = App.src.kind === 'replay';
     const canControl = isReplay || apiReplay();
@@ -310,6 +323,10 @@
     const openDemo = (open) => { pop.hidden = !open; $('btn-demo').setAttribute('aria-expanded', String(open)); };
     $('btn-demo').onclick = (e) => { e.stopPropagation(); openDemo(pop.hidden); };
     document.addEventListener('click', (e) => { if (!pop.hidden && !e.target.closest('.demo-wrap')) openDemo(false); });
+
+    const bpop = $('bell-pop');
+    $('btn-bell').onclick = (e) => { e.stopPropagation(); renderBell(); bpop.hidden = !bpop.hidden; $('btn-bell').setAttribute('aria-expanded', String(!bpop.hidden)); };
+    document.addEventListener('click', (e) => { if (!bpop.hidden && !e.target.closest('.bell-wrap')) bpop.hidden = true; });
 
     $('btn-play').onclick = togglePlay;
     document.querySelectorAll('#speed button').forEach((b) => (b.onclick = () => {
@@ -330,7 +347,7 @@
     scrub.addEventListener('change', () => {
       App.dragging = false;
       logEvent('info', `Демо: перемотка на ${U.time(+scrub.value)}`);
-      // в backend перемотка это запуск воспроизведения заново с нового времени
+      // В backend перемотка = перезапуск воспроизведения с нового времени.
       if (apiReplay()) control('start', { t: U.time(+scrub.value), speed: App.playing ? App.speed : 0 });
     });
     $('btn-link').onclick = toggleLink;
@@ -358,7 +375,16 @@
       if (e.code === 'ArrowLeft' && isReplay) jump(App.now - 300);
     });
 
+    // Делегирование кликов: карточки, кнопки «В работу» / «Подробнее», фильтры сводки.
     document.addEventListener('click', (e) => {
+      const ms = e.target.closest('[data-measure]');
+      if (ms) { window.Measures.open(ms.dataset.measure, +ms.dataset.tr); return; }
+      const mc = e.target.closest('[data-cancel-measure]');
+      if (mc) { window.Measures.cancel(+mc.dataset.cancelMeasure); return; }
+      const trk = e.target.closest('[data-track]');
+      if (trk) { select(+trk.dataset.track); App.tab = 'attention'; return; }
+      const drv = e.target.closest('[data-driver]');
+      if (drv) { showDriverDialog(drv.dataset.tr, drv.dataset.inc); return; }
       const ack = e.target.closest('[data-ack]');
       if (ack) {
         const id = ack.dataset.ack;
@@ -391,7 +417,6 @@
     });
   }
 
-  /** Переключает вкладку правой панели. */
   function setTab(tab) {
     App.tab = tab;
     document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
@@ -399,7 +424,6 @@
     App.dirty = true;
   }
 
-  /** Выбирает ТС или снимает выбор при повторном клике. */
   function select(tr) {
     App.sel = App.sel === tr ? null : tr;
     App.selChanged = true;
@@ -415,17 +439,22 @@
         pts = App.net.sectionPath(App.sel, visits, i, j, v && v.route_pattern_id);
       }
       if (v) pts.push([v.lat, v.lon]);
-      // приближаем после открытия панели, иначе участок уйдёт под неё
+      const reserve = !v ? (window.Measures.reserveOf(tr) || null) : null;
+      if (reserve && reserve.start && reserve.start.lat != null && reserve.start.lon != null) {
+        pts.push([reserve.start.lat, reserve.start.lon]);
+      }
+      // Приближаем после открытия нижней панели, иначе участок уйдёт за её край.
       setTimeout(() => { App.dmap.resize(); App.dmap.focus(pts); }, 120);
     }
   }
+
+  // ------------------------------------------------------------------ карта (отрисовка — js/map.js)
 
   function themeName() {
     return getComputedStyle(document.documentElement).colorScheme === 'dark' ? 'dark' : 'light';
   }
   App.themeName = themeName;
 
-  /** Создаёт карту и подписки на выбор ТС. */
   function initMap() {
     App.dmap = new DashMap('map', App.net, {
       onSelect: (tr) => select(tr),
@@ -440,7 +469,6 @@
       '<span class="row extra"><span class="line dash"></span>нет GPS-геометрии</span>';
   }
 
-  /** Подсказка к маршруту. */
   function routeTooltip(r) {
     if (!r) return '';
     const p = App.snap && App.snap.predictions.get(r.tr_id);
@@ -448,7 +476,6 @@
       (p ? `${U.sevBadge(p.severity)} ${plainDelay(p.prediction_delay_s)}` : '<span class="muted">сейчас не на линии</span>');
   }
 
-  /** Подсказка к маркеру ТС. */
   function vehTooltip(tr) {
     const s = App.snap;
     const v = s.vehicles.find((x) => x.tr_id === tr);
@@ -457,6 +484,7 @@
     const r = App.net.routeByTr.get(tr);
     let h = `<b>ТС ${tr}</b>${r ? ` · ${U.esc(r.name)}` : ' · <span class="muted">нет расписания</span>'}<br>` +
       `${U.num(v.speed)} км/ч · данные ${U.dur(v.data_age_s)} назад`;
+    // Точность позиции: съехал ли автобус с маршрута и насколько надёжно совпадение с планом.
     if (v.off_route) h += `<br><span class="sev" style="color:var(--warn)">съехал с маршрута</span>`;
     else if (v.position_quality === 'matched') h += `<br><span class="sev" style="color:var(--ok)">на маршруте</span>`;
     else if (v.position_quality) h += `<br><span class="sev" style="color:var(--muted)">позиция ${v.position_quality}</span>`;
@@ -464,12 +492,11 @@
     return h;
   }
 
-  // устаревшие данные это отсутствие свежих пакетов, а не упрощённый прогноз без ML
+  // Устаревшие данные (нет свежих пакетов) — не то же самое, что упрощённый прогноз (нет ML).
   function isStale(p, v) {
     return (p && p.status === 'stale') || (v && v.status !== 'live');
   }
 
-  /** HTML маркера ТС: стрелка курса, цвет риска и подпись с прогнозом. */
   function vehHtml(v, p, sel) {
     const sev = p ? p.severity : 'unknown';
     const col = App.colors[sev];
@@ -477,18 +504,22 @@
     if (!v.route_id) {
       return `<svg width="12" height="12" viewBox="-6 -6 12 12"><circle r="3.5" style="fill:${App.colors.unknown};stroke:${App.colors.page}" stroke-width="1.5" opacity=".8"/></svg>`;
     }
-    const tag = p && (ALERT[p.severity] || sel)
-      ? `<div class="tag"><i>${v.tr_id}</i>${U.delay(p.prediction_delay_s)}${stale ? ' · нет данных' : ''}</div>` : '';
+    const reserve = v.reserve_of != null;
+    const tag = reserve ? `<div class="tag reserve"><i>резерв</i>${p ? U.delay(p.prediction_delay_s) : 'на линии'}</div>`
+      : p && (ALERT[p.severity] || sel)
+        ? `<div class="tag"><i>${v.tr_id}</i>${U.delay(p.prediction_delay_s)}${stale ? ' · нет данных' : ''}</div>` : '';
     return `<svg width="26" height="26" viewBox="-13 -13 26 26">` +
       `<g transform="rotate(${v.heading || 0})"><path d="M0-12.5 4.5-6.5h-9z" style="fill:${stale ? App.colors.unknown : col}"/></g>` +
       `<circle r="7.5" class="ring" style="fill:${col};stroke:${sel ? App.colors.text : App.colors.page}" stroke-width="${sel ? 3 : 2}" ${stale ? 'stroke-dasharray="3 2" fill-opacity=".45"' : ''}/>` +
+      (reserve ? `<circle r="10.5" fill="none" style="stroke:${App.colors.ok}" stroke-width="1.5" stroke-dasharray="3 2"/>` : '') +
       `</svg>${tag}`;
   }
 
   /**
-   * Где ТС на плане: последняя пройденная остановка и цель прогноза.
-   * Остановка пройдена, если прибытие уже засекли или ожидаемое время прибытия прошло больше
-   * минуты назад. По одному плану нельзя: опаздывающий автобус до неё ещё не доехал.
+   * Где ТС на плане: индекс последней пройденной остановки и цели прогноза.
+   * Пройдена — если прибытие уже зафиксировано (факт / детектор прибытий) или ожидаемое время
+   * прибытия (план + ожидаемое отклонение) прошло больше минуты назад. Одного планового времени
+   * мало: опаздывающий автобус до «плановой» остановки ещё не доехал.
    */
   function progress(visits, p, now, dataNow) {
     const n = visits.plan.length;
@@ -504,9 +535,9 @@
     }
     return { n, last, ti };
   }
-  App._progress = progress;
+  App._progress = progress; // для автопроверки
 
-  /** Ожидаемое отклонение на k-й остановке: между текущим и прогнозом на цели. */
+  /** Ожидаемое отклонение на k-й остановке: от текущего к прогнозу на цели. */
   function expectedDelay(visits, p, k, ti, now) {
     if (!p) return null;
     const c0 = p.cur_dev_s != null ? p.cur_dev_s : 0;
@@ -516,7 +547,7 @@
     return c0 + (p.prediction_delay_s - c0) * Math.max(0, Math.min(1, f));
   }
 
-  /** Состояние остановок выбранного маршрута: пройдена, впереди, цель или после цели. */
+  /** Состояние остановок выбранного маршрута для карты: пройдена / впереди / цель / после цели. */
   function stopStates(tr, s) {
     const out = new Map();
     const visits = App.src.schedule(tr);
@@ -546,7 +577,6 @@
     return out;
   }
 
-  /** Обновляет карту: цвета маршрутов, проблемные участки, остановки и ТС. */
   function renderMap(s) {
     const dm = App.dmap;
     if (!dm || !dm.map) return;
@@ -561,7 +591,8 @@
     dm.setActivePatterns(activePatterns);
     dm.setRoutes(sev, App.sel);
 
-    // с backend расписание приходит не сразу, поэтому участки пересобираем примерно раз в 16 секунд
+    // Проблемные участки: от последней пройденной остановки до целевой.
+    // В режиме API расписание подгружается асинхронно, поэтому раз в ~16 с участки пересобираются.
     const alerts = [...s.predictions.values()].filter((p) => ALERT[p.severity] || p.tr_id === App.sel);
     const ssig = alerts.map((p) => `${p.tr_id}:${p.segment.from_stop_id}:${p.segment.to_stop_id}:${p.severity}:${p.status}:${p.prediction_delay_s}:${activePatterns.get(p.tr_id) || ''}`).join('|') +
       `|${App.sel}|${App.src.kind === 'api' ? Date.now() >> 14 : ''}`;
@@ -576,7 +607,8 @@
         list.push({
           tr: p.tr_id, sev: p.severity, stale: p.status === 'stale', dim: App.sel != null && App.sel !== p.tr_id,
           paths: App.net.sectionPaths(p.tr_id, visits, i, j, activePatterns.get(p.tr_id)),
-          // цель выбранного ТС видна среди остановок, а у остальных не рисуем: цель сдвигается с прогнозом
+          // Целевая остановка выбранного ТС выделяется в слое остановок; у остальных ТС маркер цели
+          // не рисуется: прогноз скользящий, и цели прыгали бы по карте.
           target: null,
         });
       }
@@ -609,6 +641,13 @@
         z: sel ? 20 : v.route_id ? rank + 12 : 1,
       });
     }
+    const onMap = new Set(list.map((x) => String(x.tr)));
+    for (const m of window.Measures.list()) {
+      const exitT = m.start && m.start.time != null ? U.ts(m.start.time) : null;
+      if (m.kind !== 'reserve' || !m.start || m.start.lat == null ||
+          (exitT != null && exitT <= App.now) || onMap.has(String(m.virtual_tr_id))) continue;
+      list.push({ tr: m.virtual_tr_id, lat: m.start.lat, lon: m.start.lon, html: ghostHtml(m), sel: false, big: true, clickable: true, z: 14 });
+    }
     dm.setVehicles(list);
 
     const hint = dm.basemapStatus === 'file'
@@ -622,7 +661,9 @@
     }
   }
 
-  /** Отклонение словами: опоздает на 2 мин 13 с или раньше на 1 мин. */
+  // ------------------------------------------------------------------ шапка, баннер, сводка
+
+  /** «+2:13» -> «опоздает на 2 мин 13 с» / «раньше на 1 мин». */
   function plainDelay(d) {
     if (d == null || isNaN(d)) return '';
     const a = Math.round(Math.abs(d)), m = Math.floor(a / 60), s = a % 60;
@@ -633,14 +674,13 @@
   }
   App.plainDelay = plainDelay;
 
-  /** Шапка: часы и свежесть данных. */
   function renderTop(s) {
     if (!App.dragging) $('clock-time').textContent = U.time(App.now, true);
     $('clock-date').textContent = U.date(App.now);
     if (!$('playback').hidden && !App.dragging) $('scrub').value = App.now;
     const m = s.metrics || {};
-    // Свежесть считаем по часам backend: наши часы между опросами идут сами
-    // и при ускоренном воспроизведении убегают на минуты вперёд.
+    // Свежесть по часам источника: в LIVE часы дашборда между опросами экстраполируются
+    // (при ускоренном воспроизведении — на минуты вперёд), поэтому берём now из ответа backend.
     const srcNow = App.src.kind === 'api' && m.now ? m.now : App.now;
     const lastAge = m.last_packet_at ? Math.max(0, srcNow - m.last_packet_at) : null;
     let text, cls;
@@ -659,7 +699,6 @@
     if (mode !== App.html.mode) { App.html.mode = mode; $('mode-badge').textContent = mode; }
   }
 
-  /** Баннер о проблемах: нет связи, данные устарели, модель недоступна. */
   function renderBanner(s) {
     const b = $('banner');
     let html = '', ok = false;
@@ -710,12 +749,105 @@
     if (html !== App.html.status) { App.html.status = html; $('statusbar').innerHTML = html; }
   }
 
+  // ------------------------------------------------------------------ «Требуют внимания» и «Маршруты»
+
   function routeName(tr) {
     const r = App.net.routeByTr.get(tr);
     return r ? r.name : 'маршрут не восстановлен';
   }
 
-  /** Карточка инцидента в списке «Требуют внимания». */
+  function measureButtons(tr) {
+    const Ms = window.Measures;
+    if (Ms.reserveOf(tr)) return ''; // сам резервный автобус
+    // Кнопки всегда активны: в live применяют меру через backend, в replay — демо-режим (без сервера).
+    return `<button class="mb" data-measure="reserve" data-tr="${tr}" title="Резервный автобус возьмёт рейс с ближайшей остановки, к которой успевает">＋ Доп. автобус</button>` +
+      `<button class="mb" data-measure="dwell" data-tr="${tr}" title="Короче стоянки на остановках и отстой на конечной">Сократить стоянки</button>`;
+  }
+
+  function measureChips(tr) {
+    const same = (a, b) => String(a) === String(b);
+    const chips = window.Measures.forTr(tr).map((m) => {
+      let label;
+      if (m.kind === 'reserve' && same(m.virtual_tr_id, tr)) label = `резерв линии ТС ${m.tr_id}`;
+      else if (m.kind === 'reserve') label = `＋ резерв ${m.virtual_tr_id}${m.start ? ` · ${m.state === 'к точке выхода' ? 'выход' : 'с'} ${U.time(U.ts(m.start.time))}` : ''}`;
+      else {
+        const v = (m.vehicles || []).find((x) => same(x.tr_id, tr));
+        const t = v && v.target;
+        label = `⏱ стоянки −${m.cut_s} с${t ? `: ${U.delay(t.delay_s)} → ${U.delay(t.delay_measure_s)}` : ''}`;
+      }
+      return `<span class="m-chip ${m.kind}" title="${U.esc(m.text || '')}">${U.esc(label)}` +
+        `<button class="linkbtn" data-cancel-measure="${m.id}" title="${m.kind === 'reserve' ? 'Снять резерв с линии' : 'Отменить меру'}">✕</button></span>`;
+    });
+    return chips.length ? `<div class="m-chips">${chips.join('')}</div>` : '';
+  }
+
+  /** Текст о мерах для панели «Почему так считаем». */
+  function measureNotes(tr) {
+    const same = (a, b) => String(a) === String(b);
+    return window.Measures.forTr(tr).map((m) => {
+      if (m.kind === 'reserve' && same(m.virtual_tr_id, tr)) {
+        return `<div class="rec measure"><b>Резервный автобус</b> линии ТС ${m.tr_id}, ${U.esc(m.state || '')}. ${U.esc(m.text || '')}</div>`;
+      }
+      if (m.kind === 'reserve') {
+        return `<div class="rec measure"><b>Выпущен резерв ${m.virtual_tr_id}</b> (${U.esc(m.state || '')}). ${U.esc(m.text || '')}</div>`;
+      }
+      const v = (m.vehicles || []).find((x) => same(x.tr_id, tr));
+      const b = v && v.back_on_schedule;
+      return `<div class="rec measure"><b>Сокращены стоянки</b> (${m.scope === 'route' ? 'вся линия' : 'это ТС'}, −${m.cut_s} с` +
+        `${m.short_layover ? ', отстой 2 мин' : ''}). ` + (v && v.target
+        ? `К «${U.esc(v.target.stop_name)}» ${U.delay(v.target.delay_s)} → <b>${U.delay(v.target.delay_measure_s)}</b>` +
+          (b ? `, в графике с «${U.esc(b.stop_name)}» в ${U.time(U.ts(b.time_plan))}` : '') +
+          `; остановок с опозданием > 2 мин: ${v.late_stops} → <b>${v.late_stops_measure}</b>.`
+        : 'Эффект появится вместе с прогнозом.') + '</div>';
+    }).join('');
+  }
+
+  /** Резерв ещё едет к точке выхода — «призрак» на остановке выхода, пока нет его отметок. */
+  function ghostHtml(m) {
+    return `<svg width="26" height="26" viewBox="-13 -13 26 26"><circle r="7.5" class="ring" style="fill:${App.colors.ok};stroke:${App.colors.page}"` +
+      ` stroke-width="2" stroke-dasharray="3 2" fill-opacity=".35"/></svg>` +
+      `<div class="tag reserve"><i>резерв</i>выход ${U.time(U.ts(m.start.time))}</div>`;
+  }
+
+  function tripBadge(p) {
+    if (p === 'first') return `<span class="trip-badge first" title="Открывающий рейс — критичен по плану">открывающий</span>`;
+    if (p === 'last') return `<span class="trip-badge last" title="Закрывающий рейс — критичен по плану">закрывающий</span>`;
+    return '';
+  }
+
+  /** Диалог «Связаться с водителем»: отправка сообщения с прогнозом водителю через NDTP. */
+  function showDriverDialog(tr, incId) {
+    const s = App.snap || {};
+    // Берём данные прогноза; при отсутствии — данные инцидента (чтобы не было пустых «—»).
+    let p = s.predictions ? s.predictions.get(tr) : null;
+    let inc = null;
+    if (incId && s.incidents) inc = s.incidents.find((x) => String(x.incident_id) === String(incId));
+    if (!p && inc) p = inc;
+    const dlg = $('driver-dlg');
+    const body = $('d-body');
+    if (!dlg || !body) return;
+    const delay = p && p.prediction_delay_s != null ? U.delay(p.prediction_delay_s) : '—';
+    const target = p && p.target_stop_name ? p.target_stop_name : '—';
+    const at = p && p.predicted_arrival ? U.time(p.predicted_arrival) : '—';
+    body.innerHTML =
+      `<p class="m-ctx">ТС <b>${tr}</b> · ${p && p.severity ? U.sevBadge(p.severity) : ''}</p>` +
+      `<div class="d-msg"><b>Сообщение водителю:</b><br>по прогнозу к «${U.esc(target)}» вы придёте в ${at} (${delay}). Просьба подтвердить статус по бортовому терминалу.</div>`;
+    dlg.dataset.tr = tr;
+    dlg.showModal();
+  }
+
+  function initDriverDialog() {
+    const dlg = $('driver-dlg');
+    if (!dlg) return;
+    $('d-cancel').onclick = () => dlg.close();
+    $('d-send').onclick = () => {
+      const tr = dlg.dataset.tr;
+      logEvent('info', `Сообщение отправлено водителю ТС ${tr}`);
+      if (window.Measures && window.Measures.toast) window.Measures.toast(`<b>Сообщение отправлено водителю ТС ${tr}</b>`, 'ok', 2000);
+      dlg.close();
+    };
+  }
+
   function attentionCard(i) {
     const sev = i.severity;
     const color = U.SEV[sev].color;
@@ -735,25 +867,31 @@
       if (conf && !simple) meta.push(`уверенность ${conf}`);
       if (simple) meta.push('прогноз упрощённый: модель недоступна');
       if (stale) meta.push('данные устарели');
+      // Приоритет рейса (открывающий/закрывающий — финансовый риск) и нужная скорость для графика.
+      const sp = i.speed_required_kmh != null
+        ? `<div class="a-speed">Для восстановления графика нужна средняя скорость ≈ <b>${Math.round(i.speed_required_kmh)} км/ч</b></div>` : '';
       details = `<div class="a-details">` +
         `<div>Участок: <b>${U.esc(i.segment.from_stop_name)}</b> → <b>${U.esc(i.segment.to_stop_name)}</b></div>` +
         `<div>По плану <b>${U.time(i.target_time_begin)}</b> → ожидается <b>${U.time(i.predicted_arrival)}</b></div>` +
         (r && !calming && r.detail ? `<div class="a-detail">${U.esc(r.detail)}</div>` : '') +
         (i.recommendation && !calming ? `<div class="rec">${U.esc(i.recommendation)}</div>` : '') +
-        `<div class="a-meta">${meta.join(' · ')}</div></div>`;
+        (!calming && !simple && sp ? sp : '') +
+        `<div class="a-meta">${meta.join(' · ')}</div>` +
+        (!calming ? `<div class="a-measures"><span class="muted">Меры:</span>${measureButtons(i.tr_id)}</div>` : '') + '</div>';
     }
+    const applied = measureChips(i.tr_id);
     return `<div class="acard${sel}${stale ? ' stale' : ''}" style="--c:${color}" data-tr="${i.tr_id}">` +
       `<div class="a-top"><span class="a-ic">${U.sevIcon(sev, 16)}</span>` +
-      `<div class="a-main"><div class="a-title">ТС ${i.tr_id} <span class="a-route">${U.esc(routeName(i.tr_id))}</span></div>` +
+      `<div class="a-main"><div class="a-title">ТС ${i.tr_id} <span class="a-route">${U.esc(routeName(i.tr_id))}</span>${tripBadge(i.trip_priority)}</div>` +
       `<div class="a-when">${until > 0 ? `через <b>${U.dur(until)}</b>` : '<b>сейчас</b>'} · к «${U.esc(i.target_stop_name)}»</div>` +
-      `<div class="a-why">${U.esc(why)}${stale ? ' · <span class="muted">нет свежих данных</span>' : ''}</div></div>` +
+      `<div class="a-why">${U.esc(why)}${stale ? ' · <span class="muted">нет свежих данных</span>' : ''}</div>${applied}</div>` +
       `<div class="a-delay num">${U.delay(i.prediction_delay_s)}<small>${word}</small></div></div>` +
       `${details}<div class="a-actions">` +
+      `<button class="ghost sm" data-driver="1" data-inc="${i.incident_id}" data-tr="${i.tr_id}">Связаться с водителем</button>` +
       `<button class="ghost sm" data-ack="${i.incident_id}" data-tr="${i.tr_id}">В работу</button>` +
       `<button class="ghost sm" data-expand="${i.incident_id}">${open ? 'Свернуть ▴' : 'Подробнее ▾'}</button></div></div>`;
   }
 
-  /** Строка инцидента, который уже взяли в работу. */
   function workRow(i) {
     return `<div class="wrow" style="--c:${U.SEV[i.severity].color}" data-tr="${i.tr_id}">${U.sevIcon(i.severity, 13)}` +
       `<span class="w-tr">ТС ${i.tr_id}</span><span class="w-d num">${U.delay(i.prediction_delay_s)}</span>` +
@@ -761,10 +899,9 @@
       `<button class="linkbtn" data-ack="${i.incident_id}" data-tr="${i.tr_id}">вернуть</button></div>`;
   }
 
-  /** Список «Требуют внимания». */
   function renderAttention(s) {
     const act = s.incidents.filter((i) => i.status === 'active');
-    // выше то, что случится раньше и с большим опозданием, стабилизирующиеся в конце
+    // Сначала те, где событие раньше и опоздание больше; «стабилизируется» — в конце.
     const score = (i) => (i.severity === 'ok' ? -1e6 : U.SEV[i.severity].rank * 1e4 - Math.max(0, i.target_time_begin - App.now));
     const todo = act.filter((i) => !App.ack.has(i.incident_id)).sort((a, b) => score(b) - score(a));
     const work = act.filter((i) => App.ack.has(i.incident_id));
@@ -772,10 +909,37 @@
     let html = todo.length ? todo.map(attentionCard).join('')
       : `<div class="empty">${U.sevIcon('ok', 22)}<br>Сейчас ничего не требует внимания.<br>Все ТС идут по графику.</div>`;
     if (work.length) html += `<div class="section-title">В работе · ${work.length}</div>` + work.map(workRow).join('');
+    html += renderMeasuresPanel();
     if (html !== App.html.att) { App.html.att = html; $('tab-attention').innerHTML = html; }
   }
 
-  /** Список маршрутов, самые проблемные сверху. */
+  /** Панель применённых диспетчером мер: клик по записи приближает к ТС/резерву на карте. */
+  function renderMeasuresPanel() {
+    const ms = window.Measures.list();
+    if (!ms.length) return '';
+    const rows = ms.map((m) => {
+      const t = m.applied_at != null ? U.time(m.applied_at) : '';
+      const timeHtml = t ? `<span class="m-time">${t}</span>` : '';
+      if (m.kind === 'reserve') {
+        const name = m.start && m.start.stop_name ? U.esc(m.start.stop_name) : '';
+        const exitT = m.start && m.start.time != null ? U.ts(m.start.time) : null;
+        const state = (exitT != null && exitT <= App.now) ? 'в пути · на линии' : (m.state || 'к точке выхода');
+        const dep = m.start && m.start.departure_s != null ? ` · отправление ${U.time(m.start.departure_s)}` : '';
+        return `<div class="mrow reserve" data-track="${m.virtual_tr_id}" title="Показать резерв на карте">` +
+          `<span class="m-ic">🚌</span><span class="m-main"><span class="m-t">Резерв ТС ${m.tr_id} · с «${name}»</span>` +
+          `<span class="m-sub">${U.esc(state)}${dep}${timeHtml ? ` · ${timeHtml}` : ''}</span></span></div>`;
+      }
+      const who = m.scope === 'route' ? `линия ${m.tr_id}` : `ТС ${m.tr_id}`;
+      const v = (m.vehicles || [])[0];
+      const eff = v && v.target
+        ? ` · ${U.delay(v.target.delay_s)} → ${U.delay(v.target.delay_measure_s)}` : '';
+      return `<div class="mrow dwell" data-track="${m.tr_id}" title="Показать ТС и остановки с сокращённой стоянкой на карте">` +
+        `<span class="m-ic">⏱</span><span class="m-main"><span class="m-t">Сокращение стоянок · ${U.esc(who)} (−${m.cut_s} с)</span>` +
+        `<span class="m-sub">${U.esc(eff)}${timeHtml ? ` · ${timeHtml}` : ''}</span></span></div>`;
+    }).join('');
+    return `<div class="section-title">Применённые меры · ${ms.length} <span class="muted">(клик — показать на карте)</span></div>` + rows;
+  }
+
   function renderRoutes(s) {
     const vById = new Map(s.vehicles.map((v) => [v.tr_id, v]));
     let rows = App.net.routes.map((r) => ({ r, p: s.predictions.get(r.tr_id), v: vById.get(r.tr_id) }));
@@ -799,7 +963,8 @@
     if (html !== App.html.routes) { App.html.routes = html; $('tab-routes').innerHTML = html; }
   }
 
-  /** Создаёт график отставания в панели ТС. */
+  // ------------------------------------------------------------------ карточка ТС (нижняя панель)
+
   function initCharts() {
     App.devChart = echarts.init($('chart-dev'), null, { renderer: 'canvas' });
     new ResizeObserver(() => App.devChart.resize()).observe($('chart-dev'));
@@ -817,7 +982,6 @@
     };
   }
 
-  /** Нижняя панель выбранного ТС: остановки, график и объяснение прогноза. */
   function renderDrawer(s) {
     const tr = App.sel;
     const drawer = $('drawer');
@@ -838,6 +1002,7 @@
     const now = App.now, dataNow = s.dataNow != null ? s.dataNow : now;
     const inc = s.incidents.find((i) => i.tr_id === tr && i.status === 'active');
 
+    // Шапка: кто и главное одной фразой.
     const sev = p ? p.severity : 'unknown';
     let line2;
     if (p) {
@@ -851,11 +1016,16 @@
     if (p && p.cur_dev_s != null) facts.push(`сейчас ${U.delay(p.cur_dev_s)}`);
     if (v) facts.push(`${U.num(v.speed)} км/ч`, `данные ${U.dur(v.data_age_s)} назад`);
     const head = `<div class="dh-1"><span class="t">ТС ${tr}</span>${U.sevBadge(sev)}<span class="kv">${U.esc(r ? r.name : '')}</span>` +
-      `<span class="kv muted">${facts.join(' · ')}</span>` +
+      `<span class="kv muted">${facts.join(' · ')}</span>${measureChips(tr)}` +
+      `<span class="dh-actions">${visits ? measureButtons(tr) : ''}</span>` +
       `<button class="iconbtn close" data-action="close" title="Закрыть (Esc)" aria-label="Закрыть">✕</button></div>` +
       `<div class="dh-2">${line2}</div>`;
     if (head !== App.html.dhead) { App.html.dhead = head; $('drawer-head').innerHTML = head; }
 
+    let proj = window.Measures.projection(tr);
+    if (proj && !proj.rows.length) proj = null;
+    if (proj) proj.byVisit = new Map(proj.rows.map((r) => [r.visit_id, r]));
+    // Ближайшие остановки: пройденные — с фактом, впереди — план и ожидаемое время.
     let strip = '<div class="empty">Расписание загружается…</div>';
     if (visits) {
       const { n, last, ti } = progress(visits, p, now, dataNow);
@@ -877,6 +1047,8 @@
           const d = expectedDelay(visits, p, k, ti, now);
           if (ti >= 0 && k > ti) cls = 'after';
           tm = d == null ? U.time(visits.plan[k]) : `${U.time(visits.plan[k])} → <b>${k === ti ? '' : '≈'}${U.time(visits.plan[k] + d)}</b>`;
+          const mr = proj && visits.id ? proj.byVisit.get(visits.id[k]) : null;
+          if (mr && mr.delay_measure_s < mr.delay_s - 5) tm += ` <span class="mt" title="с мерой">≈${U.time(visits.plan[k] + mr.delay_measure_s)}</span>`;
         }
         if (k === ti) cls += ' target';
         rowsHtml.push(`<div class="stop ${cls}" style="--c:${U.SEV[sev].color}"><span class="pin"></span><span class="nm" title="${name}">${name}${k === ti ? ' · прогноз' : ''}</span><span class="tm">${tm}</span></div>`);
@@ -886,6 +1058,7 @@
     }
     if (strip !== App.html.strip) { App.html.strip = strip; $('strip').innerHTML = strip; }
 
+    // Почему так считаем: гипотеза, рекомендация, признаки.
     const src = inc || p;
     let ev = '<div class="empty">Нет прогноза</div>';
     if (src) {
@@ -899,8 +1072,10 @@
           return `<div class="row${e.flag ? ' flag' : ''}"><span class="l">${U.esc(e.label)}</span><span class="v">${val}${norm}</span></div>`;
         }).join('');
     }
+    ev = measureNotes(tr) + ev;
     if (ev !== App.html.ev) { App.html.ev = ev; $('evidence').innerHTML = ev; }
 
+    // График обновляем не чаще раза в секунду.
     const t = performance.now();
     if (!App.selChanged && t - App.lastCharts < 1000) return;
     App.lastCharts = t;
@@ -918,7 +1093,7 @@
         formatter: (ps) => (ps.length ? `<b>${U.time(ps[0].value[0] / 1000)}</b><br>` +
           ps.map((q) => `${q.marker}${q.seriesName}: <b>${U.delay(q.value[1] * 60)}</b>`).join('<br>') : ''),
       },
-      xAxis: axisTime(C, now - 5400, now + 1200),
+      xAxis: axisTime(C, now - 5400, proj ? Math.max(now + 1200, Math.min(now + 3600, proj.rows[proj.rows.length - 1].t)) : now + 1200),
       yAxis: {
         type: 'value', axisLabel: { color: C.muted, fontSize: 10.5, formatter: (x) => (x > 0 ? '+' : '') + x },
         splitLine: { lineStyle: { color: C.grid } }, min: (e) => Math.min(-2, Math.floor(e.min)), max: (e) => Math.max(3, Math.ceil(e.max)),
@@ -944,6 +1119,14 @@
           lineStyle: { width: 2, color: C.s2 }, itemStyle: { color: C.s2 },
         },
         {
+          name: 'Без меры', type: 'line', data: proj ? proj.rows.filter((r) => r.t <= now + 3600).map((r) => [r.t * 1000, r.delay_s / 60]) : [],
+          symbol: 'none', lineStyle: { width: 1.5, color: C.s2, type: 'dashed' }, itemStyle: { color: C.s2 },
+        },
+        {
+          name: 'С мерой', type: 'line', data: proj ? proj.rows.filter((r) => r.t <= now + 3600).map((r) => [r.t * 1000, r.delay_measure_s / 60]) : [],
+          symbol: 'none', lineStyle: { width: 2.5, color: C.ok }, itemStyle: { color: C.ok },
+        },
+        {
           name: 'Текущий прогноз', type: 'scatter', data: cur, symbolSize: 12, z: 5,
           itemStyle: { color: C.s2, borderColor: C.surface, borderWidth: 2 },
           label: { show: true, position: 'left', distance: 8, color: C.text, fontWeight: 600, fontSize: 11, formatter: () => (p ? U.delay(p.prediction_delay_s) : '') },
@@ -952,12 +1135,13 @@
     }, true);
   }
 
-  /** Перерисовывает текущий экран по новому состоянию. */
+  // ------------------------------------------------------------------ цикл отрисовки
+
   function update(force) {
     const s = App.src.snapshot(App.now, App.linkDownSince);
     App.snap = s;
     if (App.src.restarts && App.src.restarts !== App.seenRestarts) {
-      // backend начал воспроизведение заново, там и связь уже восстановлена
+      // Backend начал воспроизведение заново: связь там восстановлена, история страницы сброшена.
       App.seenRestarts = App.src.restarts;
       App.apiLinkDown = false;
       App.restoredAt = null;
@@ -980,7 +1164,7 @@
       }
       renderDrawer(s);
     } else if (force || performance.now() - App.lastPage > 1500) {
-      // аналитику и журнал считаем реже, там тысячи записей
+      // Аналитика и журнал пересчитываются реже: там сотни и тысячи записей.
       App.lastPage = performance.now();
       const v = window.Views[App.view];
       if (v && v.render) v.render(App, s);

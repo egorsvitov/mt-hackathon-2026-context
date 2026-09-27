@@ -61,6 +61,15 @@
           <div class="demo-hint">Пробел — пауза, ← / → — ±5 мин</div>
         </div>
       </div>
+      <div class="bell-wrap">
+        <button class="ghost iconbtn bell-btn" id="btn-bell" aria-expanded="false" title="Уведомления диспетчера">
+          🔔<span class="bell-badge" id="bell-badge" hidden>0</span>
+        </button>
+        <div class="bell-pop" id="bell-pop" hidden>
+          <div class="bell-head">Уведомления диспетчера</div>
+          <div class="bell-list" id="bell-list"></div>
+        </div>
+      </div>
       <button class="ghost" id="btn-theme" title="Светлая / тёмная тема">Тема</button>
     </div>
   </header>
@@ -174,6 +183,7 @@
   <script src="vendor/protomaps/pmtiles.js"></script>
   <script src="vendor/protomaps/basemaps.js"></script>
   <script src="vendor/echarts.min.js"></script>
+  <script src="js/measures.js?v=20260927-5"></script>
   <script src="js/util.js?v=20260927-5"></script>
   <script src="js/source-replay.js?v=20260927-5"></script>
   <script src="js/source-api.js?v=20260927-5"></script>
@@ -181,5 +191,23 @@
   <script src="js/analytics.js?v=20260927-5"></script>
   <script src="js/journal.js?v=20260927-5"></script>
   <script src="js/app.js?v=20260927-5"></script>
+  <!-- Меры диспетчера (what-if): параметры и уведомления -->
+  <dialog class="mdlg" id="measure-dlg" aria-labelledby="m-title">
+    <div class="mdlg-head"><h2 id="m-title">Мера</h2></div>
+    <div class="mdlg-body" id="m-body"></div>
+    <div class="mdlg-foot">
+      <button class="ghost" id="m-cancel">Отмена</button>
+      <button class="primary" id="m-apply">Применить</button>
+    </div>
+  </dialog>
+  <dialog class="mdlg" id="driver-dlg" aria-labelledby="d-title">
+    <div class="mdlg-head"><h2 id="d-title">Связь с водителем</h2></div>
+    <div class="mdlg-body" id="d-body"></div>
+    <div class="mdlg-foot">
+      <button class="ghost" id="d-cancel">Закрыть</button>
+      <button class="primary" id="d-send">Отправить сообщение</button>
+    </div>
+  </dialog>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
 </body>
 </html>

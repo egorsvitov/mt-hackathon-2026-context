@@ -1,4 +1,4 @@
-/* Общие утилиты дашборда: время, форматирование, уровни риска и сеть маршрутов. */
+/* Общие утилиты: время (МСК), форматирование, уровни риска, поиск, геометрия сети. */
 (function () {
   'use strict';
 
@@ -7,6 +7,7 @@
   const fmtHMS = new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const fmtDate = new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
 
+  // Подписи — языком диспетчера; пороги: опоздание > 2 мин, риск 1–2 мин, раньше графика > 1 мин.
   const SEV = {
     critical: { label: 'Опоздание', short: 'Опоздание', color: 'var(--crit)', rank: 3 },
     warning: { label: 'Риск опоздания', short: 'Риск', color: 'var(--warn)', rank: 2 },
@@ -15,7 +16,8 @@
     unknown: { label: 'Нет данных', short: 'Нет данных', color: 'var(--unknown)', rank: -1 },
   };
 
-  /** SVG-значок уровня риска. Форма повторяет цвет, чтобы уровни различались и без цвета. */
+  // Форма значка дублирует цвет: круг «!» — опоздание, треугольник — риск,
+  // ромб — опережение, круг с галочкой — в графике, пунктирный круг — нет данных.
   function sevIcon(sev, size) {
     const s = size || 14;
     const c = (SEV[sev] || SEV.unknown).color;
@@ -34,7 +36,6 @@
     }
   }
 
-  /** Значок уровня риска с подписью. */
   function sevBadge(sev, text) {
     const d = SEV[sev] || SEV.unknown;
     return `<span class="sev">${sevIcon(sev)}${text || d.label}</span>`;
@@ -45,20 +46,19 @@
   const U = {
     TZ, SEV, sevIcon, sevBadge,
 
-    /** Время по Москве, по желанию с секундами. */
     time(ep, withSec) {
       if (ep == null || isNaN(ep)) return '—';
       return (withSec ? fmtHMS : fmtHM).format(new Date(ep * 1000));
     },
     date(ep) { return fmtDate.format(new Date(ep * 1000)); },
 
-    /** Отклонение в виде +4:10 или −0:45. */
+    /** Отклонение в виде «+4:10» / «−0:45». */
     delay(s) {
       if (s == null || isNaN(s)) return '—';
       const a = Math.round(Math.abs(s));
       return `${sign(Math.round(s))}${Math.floor(a / 60)}:${String(a % 60).padStart(2, '0')}`;
     },
-    /** Длительность словами: 12 мин или 45 с. */
+    /** Длительность «12 мин» / «45 с». */
     dur(s) {
       if (s == null || isNaN(s)) return '—';
       s = Math.round(Math.abs(s));
@@ -74,7 +74,7 @@
     esc(s) {
       return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     },
-    /** ISO-строку или число переводит в Unix-время в секундах. */
+    /** ISO-строка или число секунд -> epoch-секунды. */
     ts(x) {
       if (x == null) return null;
       if (typeof x === 'number') return x;
@@ -88,16 +88,16 @@
       if (pred <= thr.early) return 'early';
       return 'ok';
     },
-    /** Сколько элементов отсортированного массива не больше x. */
+    /** Количество элементов отсортированного массива, которые <= x. */
     countLE(arr, x) {
       let lo = 0, hi = arr.length;
       while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid] <= x) lo = mid + 1; else hi = mid; }
       return lo;
     },
     cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); },
-    /** Класс задержки как в разметке организаторов: раньше больше чем на минуту, опоздание больше 2 минут. */
+    /** Класс задержки по порогам организаторов (target_class): early < −60 с, late > +120 с. */
     classOf(d) { return d < -60 ? 'early' : d > 120 ? 'late' : 'ontime'; },
-    /** Уверенность прогноза словами или null, если модель не дала вероятность. */
+    /** Уверенность словами по вероятности опоздания; null — модель вероятность не дала. */
     confidence(prob) {
       if (prob == null || isNaN(prob)) return null;
       return prob >= 0.7 ? 'высокая' : prob >= 0.4 ? 'средняя' : 'низкая';
@@ -109,11 +109,15 @@
     },
   };
 
-  /** Сеть маршрутов, общая для воспроизведения и backend. */
+  /**
+   * Сеть маршрутов в общем виде для обоих источников данных.
+   * raw = {stops: [{stop_key, lat, lon, name}], routes: [{route_id, tr_id, name, speed_norm_kmh, stops, segments}]}
+   */
   class Network {
     constructor(raw) {
       this.stops = new Map(raw.stops.map((s) => [s.stop_key, s]));
-      this.routes = raw.routes.slice().sort((a, b) => a.tr_id - b.tr_id);
+      // Резервные автобусы (мера диспетчера) — не отдельные маршруты: линия та же, что у основного ТС.
+      this.routes = raw.routes.filter((r) => r.reserve_of == null).sort((a, b) => a.tr_id - b.tr_id);
       this.routeByTr = new Map(this.routes.map((r) => [r.tr_id, r]));
       this.seg = new Map();
       for (const r of this.routes) {
@@ -125,16 +129,27 @@
         }
         this.seg.set(r.tr_id, patterns);
       }
+      for (const r of raw.routes) if (r.reserve_of != null) this.addReserve(r);
     }
     stopName(key) { const s = this.stops.get(key); return s ? s.name : '—'; }
 
-    /** Линии участков маршрута между посещениями i и j для одного направления рейса. */
+    /** Маршрут резервного автобуса (мера диспетчера): доступен по tr_id, но не входит в список
+        маршрутов — линия та же, что у основного ТС, и уже нарисована. */
+    addReserve(r) {
+      if (this.routeByTr.has(r.tr_id)) return;
+      this.routeByTr.set(r.tr_id, r);
+      const patterns = new Map([['', new Map(r.segments.map((s) => [`${s.from}-${s.to}`, s]))]]);
+      this.seg.set(r.tr_id, patterns);
+    }
+
+    /** Отдельные дорожные полилинии между посещениями i..j для одного паттерна. */
     sectionPaths(tr, visits, i, j, routePatternId = null) {
       const patterns = this.seg.get(tr);
       if (!patterns || !visits || i < 0 || j < 0) return [];
       let segs = routePatternId ? patterns.get(routePatternId) : null;
       if (!segs && patterns.size === 1) segs = patterns.values().next().value;
-      // направлений несколько, а текущее неизвестно: лучше не рисовать, чем нарисовать чужое
+      // With several directions, drawing a segment from another pattern is worse
+      // than omitting the alert overlay until the matcher identifies the pattern.
       if (!segs) return [];
       if (i > j) [i, j] = [j, i];
       const paths = [];
@@ -147,7 +162,7 @@
       return paths;
     }
 
-    /** Все точки участка одним списком, только чтобы подогнать камеру. */
+    /** Flattened form is used only to calculate camera bounds, never as a line. */
     sectionPath(tr, visits, i, j, routePatternId = null) {
       return this.sectionPaths(tr, visits, i, j, routePatternId).flat();
     }
