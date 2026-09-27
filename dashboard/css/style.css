@@ -554,3 +554,8 @@ button.primary:disabled { opacity: .45; cursor: not-allowed; }
 .toast.ok { border-left-color: var(--ok); }
 .toast.hide { opacity: 0; transform: translateY(-8px); }
 .toast-body { flex: 1; }
+.veh .tag.reserve { border-color: var(--ok); }
+.veh .tag.reserve i { color: var(--ok); }
+.stop .mt { color: var(--ok); font-weight: 600; margin-left: 2px; }
+.rec.measure { border-left: 3px solid var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--surface-3)); margin-bottom: 6px; }
+.ghost.sm:disabled { opacity: .5; cursor: not-allowed; }

@@ -99,9 +99,12 @@ class Pipeline:
         self.spatial: StreamingSpatialAdapter | None = None
         self.spatial_states: dict[str, MatchState] = {}
         self.spatial_error: str | None = None
+        self.whatif = None  # меры диспетчера (services/whatif.py), подключаются при старте
         self.reset()
 
     def reset(self) -> None:
+        if self.whatif is not None:
+            self.whatif.clear()
         self.features.reset()
         self.incidents.reset()
         if self.spatial is not None:
@@ -406,6 +409,7 @@ class Pipeline:
                     "route_pattern_id": spatial.route_pattern_id if matched else None,
                     "position_quality": spatial.position_quality if matched else "raw",
                     "off_route": spatial.off_route if matched else None,
+                    "reserve_of": tr_out(self.whatif.reserve_of(tr)) if self.whatif and self.whatif.reserve_of(tr) else None,
                 }
             )
         return out

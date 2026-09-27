@@ -43,6 +43,7 @@ class Route(BaseModel):
     speed_norm_kmh: float | None = None
     stops: list[int]
     segments: list[RouteSegment]
+    reserve_of: TrId | None = Field(None, description="Резервный автобус линии этого ТС (мера диспетчера)")
 
 
 class Network(BaseModel):
@@ -80,6 +81,7 @@ class Vehicle(BaseModel):
     route_pattern_id: str | None = None
     position_quality: str | None = None
     off_route: bool | None = None
+    reserve_of: TrId | None = Field(None, description="Резервный автобус, выпущенный на линию этого ТС")
 
 
 class Reason(BaseModel):

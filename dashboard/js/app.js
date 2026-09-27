@@ -471,11 +471,14 @@
     if (!v.route_id) {
       return `<svg width="12" height="12" viewBox="-6 -6 12 12"><circle r="3.5" style="fill:${App.colors.unknown};stroke:${App.colors.page}" stroke-width="1.5" opacity=".8"/></svg>`;
     }
-    const tag = p && (ALERT[p.severity] || sel)
-      ? `<div class="tag"><i>${v.tr_id}</i>${U.delay(p.prediction_delay_s)}${stale ? ' · нет данных' : ''}</div>` : '';
+    const reserve = v.reserve_of != null;
+    const tag = reserve ? `<div class="tag reserve"><i>резерв</i>${p ? U.delay(p.prediction_delay_s) : 'на линии'}</div>`
+      : p && (ALERT[p.severity] || sel)
+        ? `<div class="tag"><i>${v.tr_id}</i>${U.delay(p.prediction_delay_s)}${stale ? ' · нет данных' : ''}</div>` : '';
     return `<svg width="26" height="26" viewBox="-13 -13 26 26">` +
       `<g transform="rotate(${v.heading || 0})"><path d="M0-12.5 4.5-6.5h-9z" style="fill:${stale ? App.colors.unknown : col}"/></g>` +
       `<circle r="7.5" class="ring" style="fill:${col};stroke:${sel ? App.colors.text : App.colors.page}" stroke-width="${sel ? 3 : 2}" ${stale ? 'stroke-dasharray="3 2" fill-opacity=".45"' : ''}/>` +
+      (reserve ? `<circle r="10.5" fill="none" style="stroke:${App.colors.ok}" stroke-width="1.5" stroke-dasharray="3 2"/>` : '') +
       `</svg>${tag}`;
   }
 
@@ -605,6 +608,11 @@
         z: sel ? 20 : v.route_id ? rank + 12 : 1,
       });
     }
+    const onMap = new Set(list.map((x) => String(x.tr)));
+    for (const m of window.Measures.list()) {
+      if (m.kind !== 'reserve' || !m.start || m.start.lat == null || onMap.has(String(m.virtual_tr_id))) continue;
+      list.push({ tr: m.virtual_tr_id, lat: m.start.lat, lon: m.start.lon, html: ghostHtml(m), sel: false, big: true, clickable: true, z: 14 });
+    }
     dm.setVehicles(list);
 
     const hint = dm.basemapStatus === 'file'
@@ -712,15 +720,56 @@
   }
 
   function measureButtons(tr) {
-    return `<button class="ghost sm" data-measure="reserve" data-tr="${tr}" title="Резервный автобус возьмёт рейс с ближайшей остановки, к которой успевает">＋ Доп. автобус</button>` +
-      `<button class="ghost sm" data-measure="dwell" data-tr="${tr}" title="Короче стоянки на остановках и отстой на конечной">Сократить стоянки</button>`;
+    const Ms = window.Measures;
+    if (Ms.reserveOf(tr)) return ''; // сам резервный автобус
+    const off = Ms.available() ? '' : ' disabled title="Меры рассчитывает backend: откройте дашборд из docker compose"';
+    return `<button class="ghost sm" data-measure="reserve" data-tr="${tr}"${off || ' title="Резервный автобус возьмёт рейс с ближайшей остановки, к которой успевает"'}>＋ Доп. автобус</button>` +
+      `<button class="ghost sm" data-measure="dwell" data-tr="${tr}"${off || ' title="Короче стоянки на остановках и отстой на конечной"'}>Сократить стоянки</button>`;
   }
 
   function measureChips(tr) {
-    const ms = window.Measures ? window.Measures.forTr(tr) : [];
-    return ms.length ? `<div class="m-chips">${ms.map((m) =>
-      `<span class="m-chip ${m.kind}" title="${U.esc(m.text)}">${m.kind === 'reserve' ? '＋ резерв' : '⏱ стоянки'}` +
-      `<button class="linkbtn" data-cancel-measure="${m.id}" title="Отменить меру">✕</button></span>`).join('')}</div>` : '';
+    const same = (a, b) => String(a) === String(b);
+    const chips = window.Measures.forTr(tr).map((m) => {
+      let label;
+      if (m.kind === 'reserve' && same(m.virtual_tr_id, tr)) label = `резерв линии ТС ${m.tr_id}`;
+      else if (m.kind === 'reserve') label = `＋ резерв ${m.virtual_tr_id}${m.start ? ` · ${m.state === 'к точке выхода' ? 'выход' : 'с'} ${U.time(U.ts(m.start.time))}` : ''}`;
+      else {
+        const v = (m.vehicles || []).find((x) => same(x.tr_id, tr));
+        const t = v && v.target;
+        label = `⏱ стоянки −${m.cut_s} с${t ? `: ${U.delay(t.delay_s)} → ${U.delay(t.delay_measure_s)}` : ''}`;
+      }
+      return `<span class="m-chip ${m.kind}" title="${U.esc(m.text || '')}">${U.esc(label)}` +
+        `<button class="linkbtn" data-cancel-measure="${m.id}" title="${m.kind === 'reserve' ? 'Снять резерв с линии' : 'Отменить меру'}">✕</button></span>`;
+    });
+    return chips.length ? `<div class="m-chips">${chips.join('')}</div>` : '';
+  }
+
+  /** Текст о мерах для панели «Почему так считаем». */
+  function measureNotes(tr) {
+    const same = (a, b) => String(a) === String(b);
+    return window.Measures.forTr(tr).map((m) => {
+      if (m.kind === 'reserve' && same(m.virtual_tr_id, tr)) {
+        return `<div class="rec measure"><b>Резервный автобус</b> линии ТС ${m.tr_id}, ${U.esc(m.state || '')}. ${U.esc(m.text || '')}</div>`;
+      }
+      if (m.kind === 'reserve') {
+        return `<div class="rec measure"><b>Выпущен резерв ${m.virtual_tr_id}</b> (${U.esc(m.state || '')}). ${U.esc(m.text || '')}</div>`;
+      }
+      const v = (m.vehicles || []).find((x) => same(x.tr_id, tr));
+      const b = v && v.back_on_schedule;
+      return `<div class="rec measure"><b>Сокращены стоянки</b> (${m.scope === 'route' ? 'вся линия' : 'это ТС'}, −${m.cut_s} с` +
+        `${m.short_layover ? ', отстой 2 мин' : ''}). ` + (v && v.target
+        ? `К «${U.esc(v.target.stop_name)}» ${U.delay(v.target.delay_s)} → <b>${U.delay(v.target.delay_measure_s)}</b>` +
+          (b ? `, в графике с «${U.esc(b.stop_name)}» в ${U.time(U.ts(b.time_plan))}` : '') +
+          `; остановок с опозданием > 2 мин: ${v.late_stops} → <b>${v.late_stops_measure}</b>.`
+        : 'Эффект появится вместе с прогнозом.') + '</div>';
+    }).join('');
+  }
+
+  /** Резерв ещё едет к точке выхода — «призрак» на остановке выхода, пока нет его отметок. */
+  function ghostHtml(m) {
+    return `<svg width="26" height="26" viewBox="-13 -13 26 26"><circle r="7.5" class="ring" style="fill:${App.colors.ok};stroke:${App.colors.page}"` +
+      ` stroke-width="2" stroke-dasharray="3 2" fill-opacity=".35"/></svg>` +
+      `<div class="tag reserve"><i>резерв</i>выход ${U.time(U.ts(m.start.time))}</div>`;
   }
 
   function attentionCard(i) {
@@ -864,6 +913,9 @@
       `<div class="dh-2">${line2}</div>`;
     if (head !== App.html.dhead) { App.html.dhead = head; $('drawer-head').innerHTML = head; }
 
+    let proj = window.Measures.projection(tr);
+    if (proj && !proj.rows.length) proj = null;
+    if (proj) proj.byVisit = new Map(proj.rows.map((r) => [r.visit_id, r]));
     // Ближайшие остановки: пройденные — с фактом, впереди — план и ожидаемое время.
     let strip = '<div class="empty">Расписание загружается…</div>';
     if (visits) {
@@ -886,6 +938,8 @@
           const d = expectedDelay(visits, p, k, ti, now);
           if (ti >= 0 && k > ti) cls = 'after';
           tm = d == null ? U.time(visits.plan[k]) : `${U.time(visits.plan[k])} → <b>${k === ti ? '' : '≈'}${U.time(visits.plan[k] + d)}</b>`;
+          const mr = proj && visits.id ? proj.byVisit.get(visits.id[k]) : null;
+          if (mr && mr.delay_measure_s < mr.delay_s - 5) tm += ` <span class="mt" title="с мерой">≈${U.time(visits.plan[k] + mr.delay_measure_s)}</span>`;
         }
         if (k === ti) cls += ' target';
         rowsHtml.push(`<div class="stop ${cls}" style="--c:${U.SEV[sev].color}"><span class="pin"></span><span class="nm" title="${name}">${name}${k === ti ? ' · прогноз' : ''}</span><span class="tm">${tm}</span></div>`);
@@ -909,6 +963,7 @@
           return `<div class="row${e.flag ? ' flag' : ''}"><span class="l">${U.esc(e.label)}</span><span class="v">${val}${norm}</span></div>`;
         }).join('');
     }
+    ev = measureNotes(tr) + ev;
     if (ev !== App.html.ev) { App.html.ev = ev; $('evidence').innerHTML = ev; }
 
     // График обновляем не чаще раза в секунду.
@@ -929,7 +984,7 @@
         formatter: (ps) => (ps.length ? `<b>${U.time(ps[0].value[0] / 1000)}</b><br>` +
           ps.map((q) => `${q.marker}${q.seriesName}: <b>${U.delay(q.value[1] * 60)}</b>`).join('<br>') : ''),
       },
-      xAxis: axisTime(C, now - 5400, now + 1200),
+      xAxis: axisTime(C, now - 5400, proj ? Math.max(now + 1200, Math.min(now + 3600, proj.rows[proj.rows.length - 1].t)) : now + 1200),
       yAxis: {
         type: 'value', axisLabel: { color: C.muted, fontSize: 10.5, formatter: (x) => (x > 0 ? '+' : '') + x },
         splitLine: { lineStyle: { color: C.grid } }, min: (e) => Math.min(-2, Math.floor(e.min)), max: (e) => Math.max(3, Math.ceil(e.max)),
@@ -953,6 +1008,14 @@
         {
           name: 'Прогноз', type: 'line', data: h.forecasts.map(([x, d]) => [x * 1000, d / 60]), symbol: 'circle', symbolSize: 5,
           lineStyle: { width: 2, color: C.s2 }, itemStyle: { color: C.s2 },
+        },
+        {
+          name: 'Без меры', type: 'line', data: proj ? proj.rows.filter((r) => r.t <= now + 3600).map((r) => [r.t * 1000, r.delay_s / 60]) : [],
+          symbol: 'none', lineStyle: { width: 1.5, color: C.s2, type: 'dashed' }, itemStyle: { color: C.s2 },
+        },
+        {
+          name: 'С мерой', type: 'line', data: proj ? proj.rows.filter((r) => r.t <= now + 3600).map((r) => [r.t * 1000, r.delay_measure_s / 60]) : [],
+          symbol: 'none', lineStyle: { width: 2.5, color: C.ok }, itemStyle: { color: C.ok },
         },
         {
           name: 'Текущий прогноз', type: 'scatter', data: cur, symbolSize: 12, z: 5,

@@ -46,6 +46,27 @@
       }
     }
 
+    /** POST/DELETE к backend (меры диспетчера); ошибка — с текстом detail из ответа. */
+    async send(method, path, body) {
+      const r = await fetch(this.base + path, {
+        method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : `HTTP ${r.status}`);
+      return data;
+    }
+
+    /** Резервные автобусы появляются в /vehicles раньше, чем их маршрут у дашборда. */
+    async loadReserveRoutes() {
+      if (this.reserveFetch) return;
+      this.reserveFetch = true;
+      try {
+        const net = await this.get('/network');
+        for (const r of net.routes) if (r.reserve_of != null) this.network.addReserve(r);
+      } catch (e) { /* повторим на следующем опросе */ }
+      this.reserveFetch = false;
+    }
+
     async init() {
       // Сеть нужна для карты — без неё стартовать нельзя, повторяем до успеха.
       for (let attempt = 0; ; attempt++) {
@@ -109,8 +130,11 @@
           if (!i.prediction_status) i.prediction_status = (predictions.get(i.tr_id) || {}).status;
           return i;
         });
+        let measures = this.last ? this.last.measures : [];
+        try { measures = await this.get('/whatif'); } catch (e) { /* backend без мер — остаются прежние */ }
+        if (vehicles.some((v) => v.reserve_of != null && !this.network.routeByTr.has(v.tr_id))) this.loadReserveRoutes();
         this.remember(now, predictions, incidents, metrics);
-        this.last = { now, dataNow: now, down: false, vehicles, predictions, incidents, metrics };
+        this.last = { now, dataNow: now, down: false, vehicles, predictions, incidents, metrics, measures };
         this.lastOk = Date.now() / 1000;
         this.error = null;
       } catch (e) {

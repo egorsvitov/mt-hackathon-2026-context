@@ -1,15 +1,13 @@
 /* Меры диспетчера (what-if): выпуск дополнительного автобуса и сокращение стоянок.
-   Диалог с параметрами, уведомления и список применённых мер. */
+   Диалог с параметрами, уведомления; меры применяет и считает backend (/whatif):
+   резерв — настоящий автобус линии на карте, для стоянок — опоздание «как есть» и «с мерой». */
 (function () {
   'use strict';
 
   const $ = (id) => document.getElementById(id);
   const TRIP_GAP_SEC = 300; // пауза в расписании длиннее 5 мин — конец рейса (отстой на конечной)
 
-  const M = {
-    list: [], // применённые меры: {id, kind, tr, title, text, at}
-    seq: 0,
-  };
+  const M = {};
   let App = null;
   let current = null; // открытый диалог: {kind, tr}
 
@@ -116,40 +114,75 @@
     if (!dlg.open) dlg.showModal();
   }
 
-  function apply() {
+  const available = () => App && App.src.kind === 'api';
+  const same = (a, b) => String(a) === String(b);
+
+  /** Действующие меры по данным backend (обновляются каждым опросом). */
+  function list() {
+    return (App.snap && App.snap.measures) || [];
+  }
+
+  async function apply() {
     const { kind, tr, state } = current;
-    const route = App.net.routeByTr.get(tr);
-    const line = route ? route.name : `ТС ${tr}`;
-    let title, text;
-    if (kind === 'reserve') {
-      const { visits, k0, k1 } = state.plan;
-      title = 'Выпущен дополнительный автобус';
-      text = `Линия «${line}»: выход с «${stopName(visits, k0)}» в ${U.time(visits.plan[k0])}, до «${stopName(visits, k1)}»`;
-    } else {
-      const pr = state.params;
-      title = 'Сокращены стоянки';
-      text = `${pr.scope === 'route' ? `Вся линия «${line}»` : `ТС ${tr}`}: на остановках −${pr.cut_s} с` +
-        (pr.short_layover ? ', отстой на конечной до 2 мин' : '');
+    const btn = $('m-apply');
+    btn.disabled = true;
+    try {
+      let m;
+      if (kind === 'reserve') {
+        const { visits, k0 } = state.plan;
+        m = await App.src.send('POST', '/whatif/reserve',
+          { tr_id: String(tr), ready_min: +$('m-ready').value, start_visit_id: visits.id ? visits.id[k0] : null });
+        App.logEvent('info', `Выпущен дополнительный автобус ${m.virtual_tr_id} на линию ТС ${tr}. ${m.text}`);
+        toast(`<b>Выпущен дополнительный автобус · ТС ${m.virtual_tr_id}</b><br>${U.esc(m.text)}`, 'ok', 12000);
+      } else {
+        m = await App.src.send('POST', '/whatif/dwell', { tr_id: String(tr), ...state.params });
+        const who = m.scope === 'route' ? `вся линия ТС ${tr}` : `ТС ${tr}`;
+        App.logEvent('info', `Сокращены стоянки (${who}, −${m.cut_s} с${m.short_layover ? ', отстой 2 мин' : ''}): ${m.text}`);
+        toast(`<b>Сокращены стоянки · ${U.esc(who)}</b><br>${U.esc(m.text || 'эффект появится, когда будет прогноз')}`, 'info', 12000);
+      }
+      if (App.snap) App.snap.measures = [...list(), m];
+      $('measure-dlg').close();
+      App.dirty = true;
+    } catch (e) {
+      $('m-body').insertAdjacentHTML('beforeend', `<p class="m-warn">Не удалось: ${U.esc(e.message || e)}</p>`);
+    } finally {
+      btn.disabled = false;
     }
-    const m = { id: ++M.seq, kind, tr, title, text, at: App.now };
-    M.list.push(m);
-    App.logEvent('info', `${title}. ${text}`);
-    toast(`<b>${U.esc(title)}</b><br>${U.esc(text)}`, kind === 'reserve' ? 'ok' : 'info');
-    $('measure-dlg').close();
-    App.dirty = true;
   }
 
-  /** Применённые меры по ТС — для карточек и панели ТС. */
+  /** Меры, относящиеся к ТС: его собственные, мера линии, резерв (для самого резерва тоже). */
   function forTr(tr) {
-    return M.list.filter((m) => m.tr === tr);
+    return list().filter((m) => same(m.tr_id, tr) || same(m.virtual_tr_id, tr) ||
+      (m.kind === 'dwell' && (m.vehicles || []).some((v) => same(v.tr_id, tr))));
   }
 
-  function cancel(id) {
-    const m = M.list.find((x) => x.id === id);
-    if (!m) return;
-    M.list = M.list.filter((x) => x.id !== id);
-    App.logEvent('info', `Мера отменена: ${m.title.toLowerCase()} (${m.text})`);
-    App.dirty = true;
+  /** Прогноз опоздания по остановкам впереди «как есть» и «с мерой» для ТС (или null). */
+  function projection(tr) {
+    for (const m of list()) {
+      if (m.kind !== 'dwell') continue;
+      const v = (m.vehicles || []).find((x) => same(x.tr_id, tr));
+      if (v) return { m, v, rows: v.rows.map((r) => ({ ...r, t: U.ts(r.time_plan) })) };
+    }
+    return null;
+  }
+
+  /** Резерв, выпущенный на линию, если tr — сам резервный автобус. */
+  function reserveOf(tr) {
+    return list().find((m) => m.kind === 'reserve' && same(m.virtual_tr_id, tr)) || null;
+  }
+
+  async function cancel(id) {
+    const m = list().find((x) => x.id === id);
+    try {
+      await App.src.send('DELETE', `/whatif/${id}`);
+      if (App.snap) App.snap.measures = list().filter((x) => x.id !== id);
+      const what = m && m.kind === 'reserve' ? `резерв ${m.virtual_tr_id} снят с линии` : 'сокращение стоянок отменено';
+      App.logEvent('info', `Мера отменена: ${what}`);
+      toast(`Мера отменена: ${U.esc(what)}`, 'info', 5000);
+      App.dirty = true;
+    } catch (e) {
+      toast(`Не удалось отменить меру: ${U.esc(e.message || e)}`, 'info', 6000);
+    }
   }
 
   function init(app) {
@@ -158,6 +191,6 @@
     $('m-cancel').onclick = () => $('measure-dlg').close();
   }
 
-  Object.assign(M, { init, open, forTr, cancel, toast });
+  Object.assign(M, { init, open, forTr, cancel, toast, list, projection, reserveOf, available });
   window.Measures = M;
 })();
