@@ -272,6 +272,8 @@ class Pipeline:
                 for e in evidence(rf, code)
             ],
             "recommendation": REASONS[code]["recommendation"] if code else None,
+            "speed_required_kmh": _r(rf["required_speed_kmh"], 1),
+            "trip_priority": self._trip_priority(tr, j),
         }
         self.predictions[tr] = p
         self.incidents.update(tr, p)
@@ -313,6 +315,24 @@ class Pipeline:
             "target_time_begin": to_dt(p["target_time_begin"]),
             "predicted_arrival": to_dt(p["predicted_arrival"]),
         }
+
+    @staticmethod
+    def _trip_priority(tr: str, target_idx: int) -> str:
+        """Критичность рейса: первый / последний / рядовой по расписанию дня."""
+        plan = pipeline.network.plans.get(tr)
+        if plan is None or not len(plan.plan):
+            return "mid"
+        n = len(plan.plan)
+        gaps = [(plan.plan[k] - plan.plan[k - 1]) >= 300 for k in range(1, n)]  # пауза 5+ мин = граница рейса
+        # индекс текущего рейса = число границ до target_idx
+        trip = sum(1 for k in range(1, target_idx + 1) if k - 1 < len(gaps) and gaps[k - 1])
+        # число рейсов всего
+        total = sum(1 for g in gaps if g) + 1
+        if trip == 0:
+            return "first"
+        if trip == total - 1:
+            return "last"
+        return "mid"
 
     def _pred_json(self, p: dict) -> dict:
         from app.schemas.dashboard import Prediction
@@ -358,6 +378,8 @@ class Pipeline:
                     "alert_target_stop_name": alert["target_stop_name"],
                     "alert_target_time_begin": to_dt(alert["target_time_begin"]),
                     "outcome_delay_s": ep.outcome_delay_s,
+                    "speed_required_kmh": cur.get("speed_required_kmh"),
+                    "trip_priority": cur.get("trip_priority", "mid"),
                 }
             )
         return out

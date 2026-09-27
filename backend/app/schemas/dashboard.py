@@ -129,6 +129,8 @@ class Prediction(BaseModel):
     reason: Reason | None = None
     evidence: list[Evidence] = []
     recommendation: str | None = None
+    speed_required_kmh: float | None = None
+    trip_priority: Literal["first", "mid", "last"] | None = None
 
 
 class Incident(BaseModel):
@@ -158,6 +160,8 @@ class Incident(BaseModel):
     alert_target_stop_name: str | None = None
     alert_target_time_begin: datetime | None = None
     outcome_delay_s: float | None = None
+    speed_required_kmh: float | None = None
+    trip_priority: Literal["first", "mid", "last"] | None = None
 
 
 class Verified(BaseModel):

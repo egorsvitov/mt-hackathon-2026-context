@@ -92,6 +92,7 @@
     initCharts();
     for (const v of Object.values(window.Views)) if (v.init) v.init(App);
     window.Measures.init(App);
+    initDriverDialog();
     logEvent('ok', App.src.kind === 'api'
       ? `Дашборд подключён к backend (${App.src.base})`
       : `Дашборд запущен в режиме воспроизведения${App.fallbackReason ? ' — backend недоступен' : ''}`);
@@ -360,6 +361,8 @@
       if (ms) { window.Measures.open(ms.dataset.measure, +ms.dataset.tr); return; }
       const mc = e.target.closest('[data-cancel-measure]');
       if (mc) { window.Measures.cancel(+mc.dataset.cancelMeasure); return; }
+      const drv = e.target.closest('[data-driver]');
+      if (drv) { showDriverDialog(drv.dataset.tr, drv.dataset.inc); return; }
       const ack = e.target.closest('[data-ack]');
       if (ack) {
         const id = ack.dataset.ack;
@@ -722,9 +725,9 @@
   function measureButtons(tr) {
     const Ms = window.Measures;
     if (Ms.reserveOf(tr)) return ''; // сам резервный автобус
-    const off = Ms.available() ? '' : ' disabled title="Меры рассчитывает backend: откройте дашборд из docker compose"';
-    return `<button class="ghost sm" data-measure="reserve" data-tr="${tr}"${off || ' title="Резервный автобус возьмёт рейс с ближайшей остановки, к которой успевает"'}>＋ Доп. автобус</button>` +
-      `<button class="ghost sm" data-measure="dwell" data-tr="${tr}"${off || ' title="Короче стоянки на остановках и отстой на конечной"'}>Сократить стоянки</button>`;
+    // Кнопки всегда активны: в live применяют меру через backend, в replay — демо-режим (без сервера).
+    return `<button class="ghost sm" data-measure="reserve" data-tr="${tr}" title="Резервный автобус возьмёт рейс с ближайшей остановки, к которой успевает">＋ Доп. автобус</button>` +
+      `<button class="ghost sm" data-measure="dwell" data-tr="${tr}" title="Короче стоянки на остановках и отстой на конечной">Сократить стоянки</button>`;
   }
 
   function measureChips(tr) {
@@ -772,6 +775,45 @@
       `<div class="tag reserve"><i>резерв</i>выход ${U.time(U.ts(m.start.time))}</div>`;
   }
 
+  function tripBadge(p) {
+    if (p === 'first') return `<span class="trip-badge first" title="Открывающий рейс — критичен по плану">открывающий</span>`;
+    if (p === 'last') return `<span class="trip-badge last" title="Закрывающий рейс — критичен по плану">закрывающий</span>`;
+    return '';
+  }
+
+  /** Диалог «Связаться с водителем»: отправка сообщения с прогнозом водителю через NDTP. */
+  function showDriverDialog(tr, incId) {
+    const s = App.snap || {};
+    // Берём данные прогноза; при отсутствии — данные инцидента (чтобы не было пустых «—»).
+    let p = s.predictions ? s.predictions.get(tr) : null;
+    let inc = null;
+    if (incId && s.incidents) inc = s.incidents.find((x) => String(x.incident_id) === String(incId));
+    if (!p && inc) p = inc;
+    const dlg = $('driver-dlg');
+    const body = $('d-body');
+    if (!dlg || !body) return;
+    const delay = p && p.prediction_delay_s != null ? U.delay(p.prediction_delay_s) : '—';
+    const target = p && p.target_stop_name ? p.target_stop_name : '—';
+    const at = p && p.predicted_arrival ? U.time(p.predicted_arrival) : '—';
+    body.innerHTML =
+      `<p class="m-ctx">ТС <b>${tr}</b> · ${p && p.severity ? U.sevBadge(p.severity) : ''}</p>` +
+      `<div class="d-msg"><b>Сообщение водителю:</b><br>по прогнозу к «${U.esc(target)}» вы придёте в ${at} (${delay}). Просьба подтвердить статус по бортовому терминалу.</div>`;
+    dlg.dataset.tr = tr;
+    dlg.showModal();
+  }
+
+  function initDriverDialog() {
+    const dlg = $('driver-dlg');
+    if (!dlg) return;
+    $('d-cancel').onclick = () => dlg.close();
+    $('d-send').onclick = () => {
+      const tr = dlg.dataset.tr;
+      logEvent('info', `Сообщение отправлено водителю ТС ${tr}`);
+      if (window.Measures && window.Measures.toast) window.Measures.toast(`<b>Сообщение отправлено водителю ТС ${tr}</b>`, 'ok', 6000);
+      dlg.close();
+    };
+  }
+
   function attentionCard(i) {
     const sev = i.severity;
     const color = U.SEV[sev].color;
@@ -791,22 +833,27 @@
       if (conf && !simple) meta.push(`уверенность ${conf}`);
       if (simple) meta.push('прогноз упрощённый: модель недоступна');
       if (stale) meta.push('данные устарели');
+      // Приоритет рейса (открывающий/закрывающий — финансовый риск) и нужная скорость для графика.
+      const sp = i.speed_required_kmh != null
+        ? `<div class="a-speed">Для восстановления графика нужна средняя скорость ≈ <b>${Math.round(i.speed_required_kmh)} км/ч</b></div>` : '';
       details = `<div class="a-details">` +
         `<div>Участок: <b>${U.esc(i.segment.from_stop_name)}</b> → <b>${U.esc(i.segment.to_stop_name)}</b></div>` +
         `<div>По плану <b>${U.time(i.target_time_begin)}</b> → ожидается <b>${U.time(i.predicted_arrival)}</b></div>` +
         (r && !calming && r.detail ? `<div class="a-detail">${U.esc(r.detail)}</div>` : '') +
         (i.recommendation && !calming ? `<div class="rec">${U.esc(i.recommendation)}</div>` : '') +
+        (!calming && !simple && sp ? sp : '') +
         `<div class="a-meta">${meta.join(' · ')}</div>` +
         (!calming ? `<div class="a-measures"><span class="muted">Меры:</span>${measureButtons(i.tr_id)}</div>` : '') + '</div>';
     }
     const applied = measureChips(i.tr_id);
     return `<div class="acard${sel}${stale ? ' stale' : ''}" style="--c:${color}" data-tr="${i.tr_id}">` +
       `<div class="a-top"><span class="a-ic">${U.sevIcon(sev, 16)}</span>` +
-      `<div class="a-main"><div class="a-title">ТС ${i.tr_id} <span class="a-route">${U.esc(routeName(i.tr_id))}</span></div>` +
+      `<div class="a-main"><div class="a-title">ТС ${i.tr_id} <span class="a-route">${U.esc(routeName(i.tr_id))}</span>${tripBadge(i.trip_priority)}</div>` +
       `<div class="a-when">${until > 0 ? `через <b>${U.dur(until)}</b>` : '<b>сейчас</b>'} · к «${U.esc(i.target_stop_name)}»</div>` +
       `<div class="a-why">${U.esc(why)}${stale ? ' · <span class="muted">нет свежих данных</span>' : ''}</div>${applied}</div>` +
       `<div class="a-delay num">${U.delay(i.prediction_delay_s)}<small>${word}</small></div></div>` +
       `${details}<div class="a-actions">` +
+      `<button class="ghost sm" data-driver="1" data-inc="${i.incident_id}" data-tr="${i.tr_id}">Связаться с водителем</button>` +
       `<button class="ghost sm" data-ack="${i.incident_id}" data-tr="${i.tr_id}">В работу</button>` +
       `<button class="ghost sm" data-expand="${i.incident_id}">${open ? 'Свернуть ▴' : 'Подробнее ▾'}</button></div></div>`;
   }
