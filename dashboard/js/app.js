@@ -140,7 +140,7 @@
   // ------------------------------------------------------------------ события системы (для «Журнала»)
 
   function logEvent(kind, text, t) {
-    App.events.unshift({ t: t != null ? t : App.now, wall: Date.now(), kind, text });
+    App.events.unshift({ t: t != null ? t : App.now, wall: Date.now(), kind, text, read: !$('bell-pop').hidden });
     if (App.events.length > 1000) App.events.pop();
     if (App.renderBell) App.renderBell();
   }
@@ -150,13 +150,15 @@
   const notifyIcon = (text) =>
     text.includes('Сообщение') ? '💬' : text.includes('Выпущен') ? '🚌' : text.includes('Сокращены') ? '⏱' : text.includes('Мера отменена') ? '↩️' : '🔔';
   function renderBell() {
-    const evs = App.events.filter((e) => NOTIFY_KEYWORDS.some((k) => e.text.includes(k))).slice(0, 50);
+    const notifications = App.events.filter((e) => NOTIFY_KEYWORDS.some((k) => e.text.includes(k)));
+    const evs = notifications.slice(0, 50);
     const badge = $('bell-badge'), list = $('bell-list');
-    badge.hidden = evs.length === 0;
-    badge.textContent = evs.length > 99 ? '99+' : String(evs.length);
+    const unread = notifications.filter((e) => !e.read).length;
+    badge.hidden = unread === 0;
+    badge.textContent = unread > 99 ? '99+' : String(unread);
     list.innerHTML = evs.length
       ? evs.map((e) => `<div class="bell-item"><span class="be-ic">${notifyIcon(e.text)}</span>` +
-        `<span class="be-body"><div class="be-text">${U.esc(e.text)}</div><div class="be-time">${U.time(e.t, true)}</div></div></span></div>`).join('')
+        `<span class="be-body"><div class="be-text">${U.esc(e.text)}</div><div class="be-time">${U.time(e.t)}</div></div></span></div>`).join('')
       : `<div class="bell-empty">Пока нет уведомлений</div>`;
   }
   App.renderBell = renderBell;
@@ -325,7 +327,13 @@
     document.addEventListener('click', (e) => { if (!pop.hidden && !e.target.closest('.demo-wrap')) openDemo(false); });
 
     const bpop = $('bell-pop');
-    $('btn-bell').onclick = (e) => { e.stopPropagation(); renderBell(); bpop.hidden = !bpop.hidden; $('btn-bell').setAttribute('aria-expanded', String(!bpop.hidden)); };
+    $('btn-bell').onclick = (e) => {
+      e.stopPropagation();
+      bpop.hidden = !bpop.hidden;
+      if (!bpop.hidden) App.events.forEach((entry) => { entry.read = true; });
+      renderBell();
+      $('btn-bell').setAttribute('aria-expanded', String(!bpop.hidden));
+    };
     document.addEventListener('click', (e) => { if (!bpop.hidden && !e.target.closest('.bell-wrap')) bpop.hidden = true; });
 
     $('btn-play').onclick = togglePlay;
@@ -382,7 +390,13 @@
       const mc = e.target.closest('[data-cancel-measure]');
       if (mc) { window.Measures.cancel(+mc.dataset.cancelMeasure); return; }
       const trk = e.target.closest('[data-track]');
-      if (trk) { select(+trk.dataset.track); App.tab = 'attention'; return; }
+      if (trk) {
+        const tr = +trk.dataset.track;
+        const measure = window.Measures.list().find((m) => String(m.id) === trk.dataset.measureId);
+        if (measure) select(tr, { measure }); else select(tr);
+        setTab('attention');
+        return;
+      }
       const drv = e.target.closest('[data-driver]');
       if (drv) { showDriverDialog(drv.dataset.tr, drv.dataset.inc); return; }
       const ack = e.target.closest('[data-ack]');
@@ -424,8 +438,8 @@
     App.dirty = true;
   }
 
-  function select(tr) {
-    App.sel = App.sel === tr ? null : tr;
+  function select(tr, options = {}) {
+    App.sel = options.measure ? tr : App.sel === tr ? null : tr;
     App.selChanged = true;
     App.dirty = true;
     if (App.sel != null) {
@@ -434,14 +448,20 @@
       const p = s && s.predictions.get(App.sel);
       const visits = App.src.schedule(App.sel);
       let pts = [];
-      if (p && visits) {
-        const i = visits.pos.get(p.segment.from_stop_id), j = visits.pos.get(p.segment.to_stop_id);
-        pts = App.net.sectionPath(App.sel, visits, i, j, v && v.route_pattern_id);
-      }
-      if (v) pts.push([v.lat, v.lon]);
-      const reserve = !v ? (window.Measures.reserveOf(tr) || null) : null;
-      if (reserve && reserve.start && reserve.start.lat != null && reserve.start.lon != null) {
-        pts.push([reserve.start.lat, reserve.start.lon]);
+      if (options.measure && options.measure.kind === 'reserve') {
+        // В карточке меры показываем именно место резерва, а не весь прогнозный маршрут.
+        const start = options.measure.start;
+        if (start && start.lat != null && start.lon != null) pts = [[start.lat, start.lon]];
+      } else {
+        if (p && visits) {
+          const i = visits.pos.get(p.segment.from_stop_id), j = visits.pos.get(p.segment.to_stop_id);
+          pts = App.net.sectionPath(App.sel, visits, i, j, v && v.route_pattern_id);
+        }
+        if (v) pts.push([v.lat, v.lon]);
+        const reserve = !v ? (window.Measures.reserveOf(tr) || null) : null;
+        if (reserve && reserve.start && reserve.start.lat != null && reserve.start.lon != null) {
+          pts.push([reserve.start.lat, reserve.start.lon]);
+        }
       }
       // Приближаем после открытия нижней панели, иначе участок уйдёт за её край.
       setTimeout(() => { App.dmap.resize(); App.dmap.focus(pts); }, 120);
@@ -594,8 +614,8 @@
     // Проблемные участки: от последней пройденной остановки до целевой.
     // В режиме API расписание подгружается асинхронно, поэтому раз в ~16 с участки пересобираются.
     const alerts = [...s.predictions.values()].filter((p) => ALERT[p.severity] || p.tr_id === App.sel);
-    const ssig = alerts.map((p) => `${p.tr_id}:${p.segment.from_stop_id}:${p.segment.to_stop_id}:${p.severity}:${p.status}:${p.prediction_delay_s}:${activePatterns.get(p.tr_id) || ''}`).join('|') +
-      `|${App.sel}|${App.src.kind === 'api' ? Date.now() >> 14 : ''}`;
+    const ssig = alerts.map((p) => `${p.tr_id}:${p.segment.from_stop_id}:${p.segment.to_stop_id}:${p.severity}:${p.status}:${p.prediction_delay_s}:${p.cur_dev_s}:${activePatterns.get(p.tr_id) || ''}`).join('|') +
+      `|${App.sel}|${Math.floor(App.now / 30)}|${App.src.kind === 'api' ? Date.now() >> 14 : ''}`;
     if (ssig !== App.sectionSig) {
       App.sectionSig = ssig;
       const list = [];
@@ -604,12 +624,28 @@
         const visits = App.src.schedule(p.tr_id);
         if (!visits) continue;
         const i = visits.pos.get(p.segment.from_stop_id), j = visits.pos.get(p.segment.to_stop_id);
-        list.push({
+        if (i == null || j == null || i >= j) continue;
+        const parts = [];
+        const initial = expectedDelay(visits, p, i, j, App.now);
+        for (let k = i; k < j; k++) {
+          const start = expectedDelay(visits, p, k, j, App.now);
+          const end = expectedDelay(visits, p, k + 1, j, App.now);
+          if (start == null || end == null) continue;
+          // Зелёный начинается после возврата прогноза в норму; стабильные нормальные участки
+          // остаются базовой линией без цветной накладки.
+          const recover = (initial > 120 && end <= 120 && end < start) ||
+            (initial < -60 && end >= -60 && end > start);
+          const problem = end > 120 || end < -60 ||
+            (p.prediction_delay_s > 120 && end > start) ||
+            (p.prediction_delay_s < -60 && end < start);
+          if (!recover && !problem) continue;
+          for (const path of App.net.sectionPaths(p.tr_id, visits, k, k + 1, activePatterns.get(p.tr_id))) {
+            parts.push({ path, recover });
+          }
+        }
+        if (parts.length) list.push({
           tr: p.tr_id, sev: p.severity, stale: p.status === 'stale', dim: App.sel != null && App.sel !== p.tr_id,
-          paths: App.net.sectionPaths(p.tr_id, visits, i, j, activePatterns.get(p.tr_id)),
-          // Целевая остановка выбранного ТС выделяется в слое остановок; у остальных ТС маркер цели
-          // не рисуется: прогноз скользящий, и цели прыгали бы по карте.
-          target: null,
+          parts,
         });
       }
       dm.setSections(list);
@@ -630,7 +666,10 @@
 
     const showOther = $('opt-other').checked;
     const list = [];
+    const reserves = window.Measures.list().filter((m) => m.kind === 'reserve');
     for (const v of s.vehicles) {
+      if (v.reserve_of != null || reserves.some((m) => String(m.virtual_tr_id) === String(v.tr_id))) continue;
+      // Резерв отображается ожидающим маркером ниже, только до времени отправления.
       if (!v.route_id && !showOther) continue;
       if (v.route_id && !v.in_service && v.status === 'offline') continue;
       const p = s.predictions.get(v.tr_id);
@@ -641,12 +680,13 @@
         z: sel ? 20 : v.route_id ? rank + 12 : 1,
       });
     }
-    const onMap = new Set(list.map((x) => String(x.tr)));
-    for (const m of window.Measures.list()) {
-      const exitT = m.start && m.start.time != null ? U.ts(m.start.time) : null;
-      if (m.kind !== 'reserve' || !m.start || m.start.lat == null ||
-          (exitT != null && exitT <= App.now) || onMap.has(String(m.virtual_tr_id))) continue;
-      list.push({ tr: m.virtual_tr_id, lat: m.start.lat, lon: m.start.lon, html: ghostHtml(m), sel: false, big: true, clickable: true, z: 14 });
+    for (const m of reserves) {
+      const exitT = m.start && m.start.time != null ? U.ts(m.start.time)
+        : m.start && m.start.departure_s != null ? m.start.departure_s : null;
+      if (!m.start || m.start.lat == null || m.start.lon == null ||
+          (exitT != null && exitT <= App.now)) continue;
+      list.push({ tr: m.virtual_tr_id, lat: m.start.lat, lon: m.start.lon, html: ghostHtml(m),
+        sel: App.sel === +m.virtual_tr_id, big: true, clickable: true, z: 14 });
     }
     dm.setVehicles(list);
 
@@ -918,24 +958,24 @@
     const ms = window.Measures.list();
     if (!ms.length) return '';
     const rows = ms.map((m) => {
-      const t = m.applied_at != null ? U.time(m.applied_at) : '';
+      const appliedAt = m.applied_at != null ? m.applied_at : U.ts(m.created_at);
+      const t = appliedAt != null ? U.time(appliedAt) : '';
       const timeHtml = t ? `<span class="m-time">${t}</span>` : '';
       if (m.kind === 'reserve') {
         const name = m.start && m.start.stop_name ? U.esc(m.start.stop_name) : '';
-        const exitT = m.start && m.start.time != null ? U.ts(m.start.time) : null;
-        const state = (exitT != null && exitT <= App.now) ? 'в пути · на линии' : (m.state || 'к точке выхода');
-        const dep = m.start && m.start.departure_s != null ? ` · отправление ${U.time(m.start.departure_s)}` : '';
-        return `<div class="mrow reserve" data-track="${m.virtual_tr_id}" title="Показать резерв на карте">` +
+        const departure = m.start && m.start.departure_s != null ? m.start.departure_s : U.ts(m.start && m.start.time);
+        const dep = departure != null ? `отправление в ${U.time(departure)}` : '';
+        return `<div class="mrow reserve" data-track="${m.virtual_tr_id}" data-measure-id="${m.id}" title="Показать резерв на карте">` +
           `<span class="m-ic">🚌</span><span class="m-main"><span class="m-t">Резерв ТС ${m.tr_id} · с «${name}»</span>` +
-          `<span class="m-sub">${U.esc(state)}${dep}${timeHtml ? ` · ${timeHtml}` : ''}</span></span></div>`;
+          `<span class="m-sub">${dep}</span>${timeHtml}</span></div>`;
       }
       const who = m.scope === 'route' ? `линия ${m.tr_id}` : `ТС ${m.tr_id}`;
       const v = (m.vehicles || [])[0];
       const eff = v && v.target
-        ? ` · ${U.delay(v.target.delay_s)} → ${U.delay(v.target.delay_measure_s)}` : '';
-      return `<div class="mrow dwell" data-track="${m.tr_id}" title="Показать ТС и остановки с сокращённой стоянкой на карте">` +
+        ? `${U.delay(v.target.delay_s)} → ${U.delay(v.target.delay_measure_s)}` : '';
+      return `<div class="mrow dwell" data-track="${m.tr_id}" title="Показать ТС на карте">` +
         `<span class="m-ic">⏱</span><span class="m-main"><span class="m-t">Сокращение стоянок · ${U.esc(who)} (−${m.cut_s} с)</span>` +
-        `<span class="m-sub">${U.esc(eff)}${timeHtml ? ` · ${timeHtml}` : ''}</span></span></div>`;
+        `<span class="m-sub">${U.esc(eff)}</span>${timeHtml}</span></div>`;
     }).join('');
     return `<div class="section-title">Применённые меры · ${ms.length} <span class="muted">(клик — показать на карте)</span></div>` + rows;
   }
