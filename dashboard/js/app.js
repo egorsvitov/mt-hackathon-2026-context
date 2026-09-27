@@ -392,11 +392,9 @@
       if (trk) {
         const tr = +trk.dataset.track;
         const measure = window.Measures.list().find((m) => String(m.id) === trk.dataset.measureId);
+        if (measure && measure.kind === 'dwell') $('opt-stops').checked = false;
         if (measure) select(tr, { measure });
-        else if (trk.classList.contains('dwell')) {
-          $('opt-stops').checked = false;
-          select(tr, { showStops: false });
-        } else select(tr);
+        else select(tr);
         setTab('attention');
         return;
       }
@@ -985,7 +983,7 @@
       const v = (m.vehicles || [])[0];
       const eff = v && v.target
         ? `${U.delay(v.target.delay_s)} → ${U.delay(v.target.delay_measure_s)}` : '';
-      return `<div class="mrow dwell" data-track="${m.tr_id}" title="Показать ТС на карте">` +
+      return `<div class="mrow dwell" data-track="${m.tr_id}" data-measure-id="${m.id}" title="Показать ТС и остановки на карте">` +
         `<span class="m-ic">⏱</span><span class="m-main"><span class="m-t">Сокращение стоянок · ${U.esc(who)} (−${m.cut_s} с)</span>` +
         `<span class="m-sub">${U.esc(eff)}</span>${timeHtml}</span></div>`;
     }).join('');
