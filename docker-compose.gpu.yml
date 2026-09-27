@@ -1,0 +1,10 @@
+# Only use on a host with NVIDIA Container Toolkit and CUDA 13-compatible driver.
+services:
+  ml-service:
+    build:
+      target: gpu
+    environment:
+      ML_MODE: ensemble
+    gpus: all
+    healthcheck:
+      start_period: 60s

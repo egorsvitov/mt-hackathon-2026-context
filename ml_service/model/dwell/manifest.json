@@ -1,0 +1,17 @@
+{
+  "kind": "dwell",
+  "target": "dwell_time_s",
+  "numeric": [
+    "hour",
+    "stop_index",
+    "distance_m",
+    "max_gap_s"
+  ],
+  "categorical": [
+    "route_pattern_id",
+    "direction_id",
+    "stop_id"
+  ],
+  "experts": {},
+  "expert_counts": {}
+}

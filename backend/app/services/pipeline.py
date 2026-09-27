@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from route_matching import Catalog, MatchState, StreamingSpatialAdapter
+from runtime.stream import FeatureBuilder
 
 from app.api.websocket.dashboard_ws import manager
 from app.core.config import settings
@@ -106,11 +107,13 @@ class Pipeline:
         self.spatial: StreamingSpatialAdapter | None = None
         self.spatial_states: dict[str, MatchState] = {}
         self.spatial_error: str | None = None
+        self.model_features = FeatureBuilder(settings.ML_MODEL_DIR)
         self.reset()
 
     def reset(self) -> None:
         """Сбрасывает всё накопленное состояние: треки, прогнозы, инциденты, метрики."""
         self.features.reset()
+        self.model_features.reset()
         self.incidents.reset()
         if self.spatial is not None:
             self.spatial.reset()
@@ -153,6 +156,7 @@ class Pipeline:
         if self.spatial is not None:
             self.spatial.close()
             self.spatial = None
+        self.model_features.close()
 
     def load_facts(self, split: str) -> None:
         """Загружает факты прибытий. Они нужны только для сверки прогнозов, в признаки не попадают."""
@@ -231,6 +235,11 @@ class Pipeline:
                 self.spatial_error = f"{type(exc).__name__}: {exc}"
                 log.warning("Map matching update failed for tr_id=%s: %s", tr, exc)
         plan = self.network.plans.get(tr)
+        try:
+            watermark = math.floor(t / settings.PREDICT_EVERY_SEC) * settings.PREDICT_EVERY_SEC
+            self.model_features.ingest(rec, visible_until=watermark)
+        except (ValueError, KeyError, RuntimeError) as exc:
+            log.warning('ML history update failed for %s: %s', tr, exc)
         if arrival and self.evaluator and plan is not None:
             self.evaluator.on_arrival(int(plan.visit_id[arrival.idx]), arrival)
         if plan is None:
@@ -250,7 +259,16 @@ class Pipeline:
             self.incidents.drop(tr, T)
             return
         f, ctx = res
-        ml = await ml_client.predict(f)
+        plan = self.network.plans[tr]
+        try:
+            if int(tr) not in self.model_features.plans:
+                self.model_features.register_plan(tr, plan.visit_id, plan.plan, plan.lon, plan.lat)
+            model_input = self.model_features.request(tr, T, f.target_stop_id,
+                float(plan.plan[ctx['target_idx']]), f.current_delay_sec)
+            ml = await ml_client.predict(f, model_input)
+        except (ValueError, KeyError, RuntimeError) as exc:
+            log.warning('ML feature preparation failed: %s', exc)
+            ml = ml_client.fallback(f)
         pred = float(ml.prediction_delay_s)
         sev = severity_of(pred)
         rf = rule_features(f)

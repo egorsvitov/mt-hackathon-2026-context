@@ -15,7 +15,7 @@
 | [docker-compose.yml](docker-compose.yml) | NDTP-парсер + backend + CatBoost ML-сервис + дашборд одной командой: `DATA_DIR=<датасет> docker compose up --build` |
 | [research/deep-research-report.md](research/deep-research-report.md) | Обзор литературы и рекомендации по ML-архитектуре |
 | [planning/architecture_after_research.md](planning/architecture_after_research.md) | Разбор отчёта, повторная проверка данных и предложение архитектуры |
-| [ml_models/01_catboost_baseline/](ml_models/01_catboost_baseline/) | Первый CatBoost baseline: код, обученная модель, submission, тесты и описание эксперимента |
+| [ml_service/](ml_service/README.md) | Production CatBoost v2 и опциональный GPU-ансамбль TS2Vec; сохранённые веса, без обучения |
 | [ndtp-parser/](ndtp-parser/) | TCP-приёмник и парсер телеметрии NDTP в формат `traffic.csv` |
 | [research/papers/Wai_Zhou_2020_Real_Time_Bus_Time_Predictions.pdf](research/papers/Wai_Zhou_2020_Real_Time_Bus_Time_Predictions.pdf) | Wai & Zhou (2020): production-архитектура XGBoost-прогнозов времени движения и стоянки |
 

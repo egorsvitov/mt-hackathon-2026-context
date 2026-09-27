@@ -49,7 +49,7 @@ class MLServiceClient:
             features.current_delay_sec, None, self.FALLBACK_VERSION, "fallback"
         )
 
-    async def predict(self, features: MLFeaturesPayload) -> MLResult:
+    async def predict(self, features: MLFeaturesPayload, model_input=None) -> MLResult:
         """Запрашивает прогноз у ML-сервиса, при любой ошибке отдаёт fallback."""
         if time.monotonic() < self.down_until:
             return self.fallback(features)
@@ -61,7 +61,7 @@ class MLServiceClient:
         t0 = time.perf_counter()
         try:
             response = await self._client.post(
-                self.base_url, json=features.model_dump()
+                self.base_url, json=model_input.model_dump() if model_input is not None else features.model_dump()
             )
             response.raise_for_status()
             data = response.json()

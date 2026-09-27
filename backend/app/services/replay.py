@@ -46,6 +46,8 @@ class ReplayFeeder:
             path,
             usecols=[
                 "tr_id",
+                "packet_id",
+                "receive_time",
                 "unit_id",
                 "event_time",
                 "location_valid",
@@ -56,6 +58,7 @@ class ReplayFeeder:
             ],
         )
         df["t"] = naive_to_epoch(df["event_time"])
+        df['received'] = naive_to_epoch(df['receive_time'])
         df = df.sort_values("t", kind="stable")
         valid = (
             df["location_valid"].astype(str).str.lower().eq("true")
@@ -66,7 +69,7 @@ class ReplayFeeder:
         self.records = [
             RawNDTPRecord(
                 tr_id=str(tr),
-                timestamp=int(round(t)),
+                timestamp=float(t),
                 unit_id=None if pd.isna(u) else int(u),
                 lat=float(la) if ok else None,
                 lon=float(lo) if ok else None,
@@ -74,8 +77,10 @@ class ReplayFeeder:
                 heading=None if pd.isna(h) else float(h),
                 location_valid=bool(ok),
                 source="replay",
+                packet_id=str(packet),
+                receive_time=None if pd.isna(received) else float(received),
             )
-            for tr, t, u, la, lo, s, h, ok in zip(
+            for tr, t, u, la, lo, s, h, ok, packet, received in zip(
                 df["tr_id"],
                 df["t"],
                 df["unit_id"],
@@ -84,6 +89,8 @@ class ReplayFeeder:
                 df["speed"],
                 df["heading"],
                 valid,
+                df['packet_id'],
+                df['received'],
             )
         ]
         log.info("Replay: %d записей из %s", len(self.records), path)

@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -12,6 +13,7 @@ class Settings(BaseSettings):
 
     ML_SERVICE_URL: str = "http://localhost:8001/predict"
     ML_REQUEST_TIMEOUT: float = 1.5
+    ML_MODEL_DIR: str = str(Path(__file__).resolve().parents[3] / 'ml_service/model')
     # после ошибки ML не дёргаем его столько секунд и считаем без модели
     ML_RETRY_AFTER_SEC: float = 15.0
 

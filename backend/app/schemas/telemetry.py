@@ -5,7 +5,7 @@ class RawNDTPRecord(BaseModel):
     """Одна точка телеметрии после разбора NDTP или из воспроизведения CSV."""
 
     tr_id: str = Field(..., description="Идентификатор ТС (vehicle_id / tr_id)")
-    timestamp: int = Field(
+    timestamp: float = Field(
         ..., description="Время замера (event_time), Unix epoch, секунды"
     )
     lat: float | None = Field(None, description="Широта, пусто при невалидных координатах")
@@ -19,6 +19,8 @@ class RawNDTPRecord(BaseModel):
     doors_open: bool = Field(False, description="Статус открытия дверей")
     route_id: str | None = Field(None, description="Идентификатор маршрута")
     source: str = Field("ndtp", description="ndtp | replay")
+    packet_id: str | None = None
+    receive_time: float | None = None
 
 
 class MLFeaturesPayload(BaseModel):
@@ -59,7 +61,7 @@ class MLFeaturesPayload(BaseModel):
     remaining_visits: int | None = None
     hour: float | None = None
 
-    # ниже полный набор из 24 признаков модели, см. manifest.json в ml_models
+    # Legacy aliases for dashboard/rules; production ML uses runtime.schema.PredictionRequest.
     cur_dev_s: float | None = Field(
         None, description="Алиас current_delay_sec в именах модели"
     )

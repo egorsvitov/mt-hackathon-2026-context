@@ -9,9 +9,10 @@ services:
     build:
       context: .
       dockerfile: ml_service/Dockerfile
+      target: cpu
     # ports: ["${ML_PORT:-8001}:8001"] # Убрано, вызывается только внутри сети
     environment:
-      MODEL_VERSION: ${MODEL_VERSION:-01_baseline}
+      ML_MODE: catboost
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
       interval: 10s
