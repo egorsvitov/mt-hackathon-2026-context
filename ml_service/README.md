@@ -1,5 +1,35 @@
 # Production ML
 
+Навигация по ML-блоку. Здесь находятся подготовка признаков и inference сохранённых моделей; обучение и исследовательские эксперименты не входят в production runtime.
+
+| Раздел | Содержимое |
+|---|---|
+| [Запуск и диагностика](docs/running/README.md) | CPU/GPU, Docker, health и fallback |
+| [Данные и признаки](docs/pipeline/README.md) | Причинная история, map matching, окно TS2Vec и HTTP-контракт |
+| [Модели и качество](docs/models/README.md) | Состав bundle, веса ансамбля, тесты и ограничения оценок |
+| [Отчёт проверки интеграции](VERIFICATION.md) | Исторические замеры, воспроизведение прогнозов и открытые ограничения |
+| [Backend](../backend/README.md) | Приём телеметрии, онлайн-детектор задержки и вызов ML |
+| [Map matching](../map_matching/README.md) | Подготовка каталога и отдельный matcher дашборда |
+| [Научный обзор](../research/deep-research-report.md) | Исследовательский контекст, не инструкция запуска |
+
+## Карта кода
+
+| Путь | Назначение |
+|---|---|
+| [app/main.py](app/main.py) | HTTP `/predict` и `/health` |
+| [runtime/schema.py](runtime/schema.py) | Контракт запроса и валидация |
+| [runtime/stream.py](runtime/stream.py) | История телеметрии и сборка запроса в backend |
+| [runtime/features.py](runtime/features.py) | Признаки исходной телеметрии и планового расписания |
+| [runtime/spatial.py](runtime/spatial.py) | Признаки положения на маршруте |
+| [runtime/sequences.py](runtime/sequences.py) | Ресемплинг окна 45×7 |
+| [runtime/components.py](runtime/components.py) | Run/dwell-компоненты |
+| [runtime/encoder.py](runtime/encoder.py) | Замороженный TS2Vec encoder |
+| [runtime/inference.py](runtime/inference.py) | Загрузка моделей, SHA256, ансамбль и деградация |
+| [model/manifest.json](model/manifest.json) | Порядок признаков, нормализация и веса |
+| [tests/test_predict.py](tests/test_predict.py) | HTTP, причинность, fallback и контрольные fixtures |
+
+## Краткий запуск
+
 По умолчанию используется сохранённый CatBoost v2 seed42. Обучение и данные
 датасета для загрузки модели не нужны; PyTorch и NVIDIA не нужны.
 
