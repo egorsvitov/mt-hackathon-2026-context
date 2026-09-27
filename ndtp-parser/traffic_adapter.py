@@ -24,6 +24,7 @@ class PacketIdGenerator:
         self._lock = Lock()
 
     def next(self) -> int:
+        """Следующий packet_id."""
         with self._lock:
             packet_id = self._next_id
             self._next_id += 1
@@ -38,6 +39,7 @@ class TrafficAdapter:
         self._packet_ids = PacketIdGenerator()
 
     def convert(self, telemetry: Telemetry) -> TrafficRow:
+        """Строка traffic.csv из телеметрии, tr_id берётся по unit_id."""
         tr_id = self._unit_to_tr_id.get(telemetry.unit_id)
         if tr_id is None:
             raise UnknownUnitError(

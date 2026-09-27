@@ -1,3 +1,3 @@
-/* Настройки дашборда. В Docker перезаписывается из переменной DASHBOARD_API.
-   api: null — воспроизведение из data/replay.js; "/api" или "http://host:8000" — живой backend. */
+/* Настройки дашборда, в Docker файл перезаписывается из DASHBOARD_API.
+   api: null значит воспроизводить data/replay.js, иначе это адрес backend, например "/api/v1". */
 window.DASH_CONFIG = { api: null };

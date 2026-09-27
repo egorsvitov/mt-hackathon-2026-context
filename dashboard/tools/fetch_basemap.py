@@ -1,14 +1,12 @@
-"""Скачивает подложку карты: вырезку OpenStreetMap по району маршрутов в ``data/basemap/moscow.pmtiles``.
+"""Скачивает подложку карты: вырезку OpenStreetMap по району маршрутов в data/basemap/moscow.pmtiles.
 
-Источник — открытая ежедневная сборка Protomaps (данные OSM, лицензия ODbL). Скачиваются
-только нужные тайлы (HTTP Range), это ~60 МБ и меньше минуты. Нужен один раз: дальше карта
-работает без интернета.
+Источник открытая ежедневная сборка Protomaps (данные OSM, лицензия ODbL). Качаются только
+нужные тайлы, около 60 МБ. Нужно один раз, дальше карта работает без интернета.
 
-    python dashboard/tools/fetch_basemap.py                       # свежая сборка, район Москвы, зум до 14
-    python dashboard/tools/fetch_basemap.py --source moscow.pmtiles   # взять готовый файл/зеркало команды
+    python dashboard/tools/fetch_basemap.py                          # свежая сборка, зум до 14
+    python dashboard/tools/fetch_basemap.py --source moscow.pmtiles  # взять готовый файл
 
-Для вырезки используется утилита ``pmtiles`` (go-pmtiles): берётся из PATH или скачивается
-с GitHub в ``tools/.cache/``.
+Нужна утилита pmtiles: берётся из PATH или скачивается с GitHub в tools/.cache.
 """
 
 from __future__ import annotations
@@ -30,12 +28,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 OUT = HERE.parent / "data" / "basemap" / "moscow.pmtiles"
 CACHE = HERE / ".cache"
-BBOX = "36.95,55.42,38.05,56.08"  # все маршруты датасета с запасом (Зеленоград — Видное, Внуково — Балашиха)
+BBOX = "36.95,55.42,38.05,56.08"  # все маршруты датасета с запасом, от Зеленограда до Видного
 PMTILES_VERSION = "1.31.2"
 BUILDS = "https://build-metadata.protomaps.dev/builds.json"
 
 
 def _get(url: str) -> bytes:
+    """GET-запрос с понятным User-Agent."""
     req = urllib.request.Request(url, headers={"User-Agent": "mt-dashboard/1.0"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return r.read()
@@ -70,12 +69,14 @@ def pmtiles_cli() -> str:
 
 
 def latest_build() -> str:
+    """Адрес последней ежедневной сборки Protomaps."""
     builds = json.loads(_get(BUILDS))
     key = max(b["key"] for b in builds if b["key"].endswith(".pmtiles"))
     return f"https://build.protomaps.com/{key}"
 
 
 def main():
+    """Скачивает вырезку карты по району маршрутов."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--source", help="URL или файл .pmtiles; по умолчанию — последняя сборка Protomaps")
     ap.add_argument("--bbox", default=BBOX, help="минДолгота,минШирота,максДолгота,максШирота")
@@ -88,7 +89,7 @@ def main():
     source = args.source or latest_build()
     cli = pmtiles_cli()
     print(f"Вырезаю {args.bbox}, зум ≤ {args.maxzoom} из {source}")
-    env = {**os.environ, "GODEBUG": "http2client=0"}  # у части сетей HTTP/2 к сборке обрывается
+    env = {**os.environ, "GODEBUG": "http2client=0"}  # в некоторых сетях HTTP/2 к сборке обрывается
     tmp = out.with_suffix(".part")
     subprocess.run([cli, "extract", source, str(tmp), f"--bbox={args.bbox}", f"--maxzoom={args.maxzoom}"],
                    check=True, env=env)

@@ -1,7 +1,7 @@
-"""Онлайн-контур: телеметрия -> состояние ТС -> признаки на T -> ML -> риск, причина -> инциденты.
+"""Онлайн-контур прогноза задержек.
 
-Один владелец состояния (этот модуль), всё в памяти процесса. Источники телеметрии —
-``POST /stream/telemetry`` (NDTP-парсер) и CSV replay (``replay.py``); оба вызывают ``ingest``.
+Телеметрия обновляет состояние ТС, раз в PREDICT_EVERY_SEC по каждому ТС считаются признаки,
+модель даёт прогноз, правила определяют уровень риска и причину, из прогнозов собираются инциденты.
 """
 
 from __future__ import annotations
@@ -43,26 +43,26 @@ OFFSET = settings.TZ_OFFSET_HOURS * 3600
 
 
 def _r(x, nd=1):
+    """Округляет число, для None и NaN возвращает None."""
     x = finite(x)
     return None if x is None else round(float(x), nd)
 
 
 class Evaluator:
-    """Сверка прогнозов с фактом (только replay). Факт раскрывается, когда его время наступило."""
+    """Сверяет прогнозы с фактом прибытия, как только факт наступил по часам воспроизведения."""
 
     def __init__(self, facts: dict[int, float]):
         self.facts = facts
         self.pending: list = []
         self.seq = itertools.count()
-        self.verified: deque = deque(
-            maxlen=20000
-        )  # все сверенные прогнозы (для аналитики и журнала)
+        self.verified: deque = deque(maxlen=20000)
         self.sum_err = self.sum_base = 0.0
         self.n = self.n5 = 0
         self.det_err = 0.0
         self.det_n = 0
 
     def register(self, p: dict) -> None:
+        """Ставит прогноз в очередь на сверку, если по его остановке есть факт."""
         fact = self.facts.get(p["target_stop_id"])
         if fact is None:
             return
@@ -72,17 +72,19 @@ class Evaluator:
         )
 
     def advance(self, now: float, incidents: IncidentTracker) -> None:
+        """Сверяет все прогнозы, факт по которым уже наступил к моменту now."""
         while self.pending and self.pending[0][0] <= now:
             _, _, p, outcome = heapq.heappop(self.pending)
             self.n += 1
             self.sum_err += abs(p["prediction_delay_s"] - outcome)
             self.sum_base += abs((p["cur_dev_s"] or 0.0) - outcome)
             incidents.set_outcome(p["tr_id"], p["target_stop_id"], outcome)
-            grid5 = int(p["as_of"]) % 300 == 0  # 5-минутная сетка, как у организаторов
+            grid5 = int(p["as_of"]) % 300 == 0  # сетка 5 минут, как в разметке организаторов
             self.n5 += grid5
             self.verified.append({**p, "outcome_delay_s": outcome, "grid5": grid5})
 
     def on_arrival(self, visit_id: int, a: Arrival) -> None:
+        """Копит ошибку детектора прибытий против факта."""
         fact = self.facts.get(visit_id)
         if fact is not None:
             self.det_err += abs(a.t - fact)
@@ -90,18 +92,24 @@ class Evaluator:
 
 
 class Pipeline:
+    """Онлайн-контур: телеметрия, состояние ТС, признаки, прогноз модели, причина и инциденты.
+
+    Всё состояние живёт в памяти процесса. Точки приходят из POST /stream/telemetry и из
+    воспроизведения, оба источника вызывают ingest.
+    """
     def __init__(self):
         self.network = NetworkStore()
         self.features = FeatureExtractor(self.network)
         self.incidents = IncidentTracker()
         self.evaluator: Evaluator | None = None
-        self.replay = None  # ReplayFeeder, если идёт воспроизведение
+        self.replay = None
         self.spatial: StreamingSpatialAdapter | None = None
         self.spatial_states: dict[str, MatchState] = {}
         self.spatial_error: str | None = None
         self.reset()
 
     def reset(self) -> None:
+        """Сбрасывает всё накопленное состояние: треки, прогнозы, инциденты, метрики."""
         self.features.reset()
         self.incidents.reset()
         if self.spatial is not None:
@@ -116,11 +124,12 @@ class Pipeline:
         self.reconnects = 0
         self.rejected_future = 0
         self._future_warned: set[str] = set()
-        self.live_seen = False  # после остановки воспроизведения пришёл живой поток
+        self.live_seen = False
         if self.evaluator:
             self.evaluator = Evaluator(self.evaluator.facts)
 
     def load_spatial(self) -> None:
+        """Загружает каталог map matching, без него работаем по сырому GPS."""
         path_value = settings.ROUTE_CATALOG_PATH
         if not path_value:
             log.info("Map matching отключён: ROUTE_CATALOG_PATH не задан")
@@ -140,12 +149,13 @@ class Pipeline:
             log.exception("Map matching отключён: каталог не загрузился")
 
     def close(self) -> None:
+        """Останавливает map matching при выключении сервиса."""
         if self.spatial is not None:
             self.spatial.close()
             self.spatial = None
 
     def load_facts(self, split: str) -> None:
-        """Факты прибытий — только для сверки в replay, в признаки не попадают."""
+        """Загружает факты прибытий. Они нужны только для сверки прогнозов, в признаки не попадают."""
         path = Path(settings.DATA_DIR) / split / "schedule.csv"
         if not settings.REPLAY_EVALUATE or not path.exists():
             return
@@ -160,23 +170,23 @@ class Pipeline:
         )
         self.evaluator = Evaluator(facts)
 
-    # ------------------------------------------------------------------ часы и статус
-
     @property
     def mode(self) -> str:
+        """replay, пока идёт воспроизведение, иначе live."""
         return "replay" if self.replay and self.replay.active else "live"
 
     def now(self) -> float:
+        """Текущее время системы: часы воспроизведения или реальные."""
         if self.mode == "replay":
             return self.replay.clock()
-        # Воспроизведение остановлено, а живого потока ещё не было: часы замирают на последнем
-        # моменте воспроизведения — дашборд показывает последнее состояние как устаревшее,
-        # а не удаляет прогнозы и инциденты как «старые» относительно текущей даты.
+        # После остановки воспроизведения часы стоят на его последнем моменте, пока не придёт
+        # живой поток. Иначе все прогнозы оказались бы старыми относительно сегодняшней даты.
         if not self.live_seen and self.replay is not None and self.replay.t is not None:
             return self.replay.clock()
         return time.time()
 
     def ingest_status(self) -> str:
+        """ok, если данные идут, down при обрыве связи или долгой тишине."""
         if self.mode == "replay":
             return "down" if self.replay.link_down else "ok"
         if (
@@ -186,20 +196,18 @@ class Pipeline:
             return "down"
         return "ok"
 
-    # ------------------------------------------------------------------ обработка потока
-
     async def ingest(self, rec: RawNDTPRecord) -> None:
+        """Принимает одну точку телеметрии и при необходимости запускает прогноз по ТС."""
         t = float(rec.timestamp)
         if not self.live_seen and rec.source != "replay" and self.mode == "live":
-            # Живой поток после остановленного воспроизведения: часы снова реальные, а состояние
-            # воспроизведения (прогнозы, инциденты, треки) — из другой линии времени, сбрасываем.
+            # пошёл живой поток после воспроизведения: старое состояние из другого дня, сбрасываем
             if self.replay is not None and self.replay.t is not None:
                 self.reset()
             self.live_seen = True
         now = self.now()
         if t > now + settings.MAX_FUTURE_SKEW_SEC:
-            # Часы трекера убежали вперёд или поток другой даты идёт поверх воспроизведения:
-            # такая отметка «заморозила» бы ТС — следующие точки считались бы опоздавшими.
+            # Часы трекера ушли вперёд или эмулятор шлёт сегодняшнюю дату поверх воспроизведения.
+            # Если принять такую точку, все следующие точки ТС будут считаться опоздавшими.
             self.rejected_future += 1
             if rec.tr_id not in self._future_warned:
                 self._future_warned.add(rec.tr_id)
@@ -234,9 +242,10 @@ class Pipeline:
             await self.predict(tr, T)
 
     async def predict(self, tr: str, T: float) -> None:
+        """Строит прогноз по ТС на момент T, определяет уровень риска и причину, обновляет инцидент."""
         t0 = time.perf_counter()
         res = self.features.extract_features(tr, T)
-        if res is None:  # цели в окне нет — ТС не на линии
+        if res is None:  # нет остановки в окне, ТС не на линии
             self.predictions.pop(tr, None)
             self.incidents.drop(tr, T)
             return
@@ -294,9 +303,11 @@ class Pipeline:
                 {"type": "prediction", "prediction": self._pred_json(p)}
             )
 
-    # ------------------------------------------------------------------ ответы API
-
     def _visible_predictions(self, now: float) -> list[dict]:
+        """Свежие прогнозы на момент now.
+
+        Старые убираем, но при обрыве связи оставляем и помечаем как stale.
+        """
         horizon = 3 * settings.PREDICT_EVERY_SEC
         down = self.ingest_status() == "down"
         out = []
@@ -316,6 +327,7 @@ class Pipeline:
 
     @staticmethod
     def _pred_out(p: dict) -> dict:
+        """Прогноз для ответа API: tr_id и времена в нужном виде."""
         return {
             **p,
             "tr_id": tr_out(p["tr_id"]),
@@ -326,14 +338,17 @@ class Pipeline:
         }
 
     def _pred_json(self, p: dict) -> dict:
+        """Прогноз в JSON для рассылки по websocket."""
         from app.schemas.dashboard import Prediction
 
         return Prediction(**self._pred_out(p)).model_dump(mode="json")
 
     def predictions_out(self) -> list[dict]:
+        """Ответ для /predictions."""
         return [self._pred_out(p) for p in self._visible_predictions(self.now())]
 
     def incidents_out(self) -> list[dict]:
+        """Ответ для /incidents: активные и недавно закрытые инциденты."""
         now = self.now()
         self._visible_predictions(now)
         stale = self.ingest_status() == "down"
@@ -374,6 +389,7 @@ class Pipeline:
         return out
 
     def vehicles_out(self) -> list[dict]:
+        """Ответ для /vehicles: последние положения ТС, по возможности привязанные к маршруту."""
         now = self.now()
         out = []
         for tr, track in self.features.tracks.items():
@@ -425,6 +441,7 @@ class Pipeline:
         return out
 
     def schedule_out(self, tr: str) -> dict | None:
+        """Ответ для /schedule: плановые посещения ТС и прибытия, которые уже засёк детектор."""
         plan = self.network.plans.get(tr)
         if plan is None:
             return None
@@ -445,7 +462,7 @@ class Pipeline:
         }
 
     def verified_out(self, limit: int, all_: bool = False) -> list[dict]:
-        """Сверенные с фактом прогнозы, новые сверху; по умолчанию — только 5-минутная сетка."""
+        """Сверенные с фактом прогнозы, новые первыми. По умолчанию только сетка 5 минут."""
         if not self.evaluator:
             return []
         rows = [p for p in self.evaluator.verified if all_ or p["grid5"]][-limit:][::-1]
@@ -469,6 +486,7 @@ class Pipeline:
         ]
 
     def metrics_out(self) -> dict:
+        """Ответ для /metrics: поток, задержка обработки, точность прогнозов."""
         now = self.now()
         vehicles = self.vehicles_out()
         lat = sorted(self.latencies)
@@ -513,6 +531,7 @@ class Pipeline:
         }
 
     def config_out(self) -> dict:
+        """Ответ для /config: пороги, горизонт, модель и параметры воспроизведения."""
         return {
             "thresholds": THRESHOLDS,
             "horizon_s": [settings.WINDOW_MIN_SEC, settings.WINDOW_MAX_SEC],
@@ -527,6 +546,7 @@ class Pipeline:
         }
 
     def _replay_info(self) -> dict | None:
+        """Параметры воспроизведения для /config или None, если его не было."""
         r = self.replay
         if r is None or r.t is None:
             return None

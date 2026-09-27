@@ -1,7 +1,6 @@
-/* Приложение: три экрана — «Диспетчерская» (здесь), «Аналитика» (analytics.js), «Журнал» (journal.js).
-   Источник данных — ReplaySource (по умолчанию) или ApiSource (?api=http://host:8000/api/v1).
-   Диспетчерская показывает только то, что нужно для решения: кто, где, насколько опоздает, почему,
-   что делать. Метрики качества и системы — на «Аналитике», подробности — в «Журнале». */
+/* Дашборд диспетчера: запуск, общее состояние и экран «Диспетчерская».
+   «Аналитика» и «Журнал» лежат в analytics.js и journal.js. Данные идут от backend
+   или из воспроизведения дня в браузере, если backend недоступен. */
 (function () {
   'use strict';
 
@@ -17,17 +16,16 @@
     linkDownSince: null, restoredAt: null,
     snap: null, lastTs: 0, lastUi: 0, lastCharts: 0, lastPage: 0, dirty: true, dragging: false,
     colors: {}, html: {},
-    ack: new Map(), // incident_id -> когда диспетчер взял в работу
-    expanded: new Set(), // раскрытые карточки
-    events: [], // журнал событий системы
-    linkLog: [], // связь и свежесть данных по времени (для «Аналитики»): {t, age, down, lag}
+    ack: new Map(), // incident_id -> когда взяли в работу
+    expanded: new Set(),
+    events: [],
+    linkLog: [], // для графика связи в аналитике
     prev: {},
   };
   window.App = App;
   window.Views = window.Views || {};
 
-  // ------------------------------------------------------------------ запуск
-
+  /** Показывает ошибку запуска поверх страницы. */
   function showError(msg) {
     let el = document.querySelector('.err-overlay');
     if (!el) { el = document.createElement('div'); el.className = 'err-overlay'; document.body.appendChild(el); }
@@ -38,6 +36,7 @@
   window.addEventListener('error', (e) => showError(`Ошибка: ${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`));
   window.addEventListener('unhandledrejection', (e) => showError(`Ошибка: ${e.reason && e.reason.message ? e.reason.message : e.reason}`));
 
+  /** Подгружает скрипт и ждёт, пока он выполнится. */
   function loadScript(src) {
     return new Promise((res, rej) => {
       const s = document.createElement('script');
@@ -48,8 +47,9 @@
     });
   }
 
+  /** Запуск: выбирает источник данных, строит карту и экраны. */
   async function boot() {
-    // Режим: ?api=<url> или config.js (Docker: DASHBOARD_API); ?replay=1 — принудительно воспроизведение.
+    // адрес backend берём из ?api= или config.js, ?replay=1 включает воспроизведение в браузере
     const cfg = window.DASH_CONFIG || {};
     const api = params.get('replay') ? null : params.get('api') || cfg.api;
     if (api) {
@@ -58,7 +58,7 @@
         App.src = new ApiSource(api, +params.get('poll') || 2000);
         await App.src.init();
       } catch (e) {
-        // Деградация: backend недоступен — работаем по историческим данным.
+        // backend недоступен, показываем исторический день
         App.fallbackReason = e.message || String(e);
         App.src = null;
         watchBackend(api);
@@ -105,6 +105,7 @@
     requestAnimationFrame(loop);
   }
 
+  /** Цикл анимации: двигает часы, маркеры и перерисовывает экран. */
   function loop(ts) {
     const dt = App.lastTs ? Math.min((ts - App.lastTs) / 1000, 1) : 0;
     App.lastTs = ts;
@@ -125,6 +126,7 @@
     requestAnimationFrame(loop);
   }
 
+  /** Читает цвета темы из CSS-переменных. */
   function readColors() {
     const v = U.cssVar;
     App.colors = {
@@ -135,15 +137,14 @@
   }
   App.readColors = readColors;
 
-  // ------------------------------------------------------------------ события системы (для «Журнала»)
-
+  /** Добавляет событие в журнал системы. */
   function logEvent(kind, text, t) {
     App.events.unshift({ t: t != null ? t : App.now, wall: Date.now(), kind, text });
     if (App.events.length > 1000) App.events.pop();
   }
   App.logEvent = logEvent;
 
-  /** Точка «связь и свежесть данных» не чаще раза в 5 с модельного времени; при перемотке назад лог сбрасывается. */
+  /** Запоминает состояние связи для графика в аналитике, не чаще раза в 5 секунд. */
   function sampleLink(s) {
     const L = App.linkLog, m = s.metrics || {}, now = App.now;
     const last = L.length ? L[L.length - 1] : null;
@@ -156,6 +157,7 @@
     if (L.length > 5000) L.shift();
   }
 
+  /** Замечает смену состояния системы и новые инциденты и пишет их в журнал. */
   function trackEvents(s) {
     const P = App.prev;
     const down = !!s.down, bdown = !!s.backendDown, ml = s.metrics ? s.metrics.ml_status : undefined;
@@ -187,8 +189,7 @@
     Object.assign(P, { init: true, down, bdown, ml, inc: status });
   }
 
-  // ------------------------------------------------------------------ экраны
-
+  /** Экран из адреса страницы. */
   function viewFromHash() {
     const h = location.hash.replace('#', '');
     if (VIEWS.includes(h)) return h;
@@ -196,6 +197,7 @@
     return 'dispatch';
   }
 
+  /** Переключает экран. */
   function setView(v, silent) {
     App.view = v;
     for (const name of VIEWS) $(`view-${name}`).hidden = name !== v;
@@ -211,10 +213,9 @@
     if (!silent) App.dirty = true;
   }
   App.setView = setView;
-  // До окончания загрузки экран не переключаем: boot сам откроет экран из адреса.
   window.addEventListener('hashchange', () => { if (App.ready) setView(viewFromHash()); });
 
-  /** Backend был недоступен при старте: проверяем раз в 5 с и предлагаем переключиться. */
+  /** Если при старте backend не отвечал, проверяем его раз в 5 секунд и предлагаем переключиться. */
   function watchBackend(api) {
     const timer = setInterval(async () => {
       try {
@@ -228,23 +229,23 @@
     }, 5000);
   }
 
-  /** Открыть ТС на диспетчерской (из журнала, аналитики, карты, списка). */
+  /** Открывает ТС на диспетчерской, откуда бы ни пришёл клик. */
   App.openVehicle = (tr) => {
     if (App.view !== 'dispatch') location.hash = '#dispatch';
     if (App.sel !== tr) select(tr);
   };
 
-  // ------------------------------------------------------------------ управление (кнопка «Демо»)
-
-  // Воспроизведение идёт в backend (режим LIVE поверх CSV replay) — управляем им через /demo/*.
+  // воспроизведение идёт в backend, управляем им через /demo/*
   const apiReplay = () => App.src.kind === 'api' && !!App.src.replayInfo;
 
+  /** Отправляет команду воспроизведению в backend и пишет её в журнал. */
   function control(action, prm, text) {
     if (App.src.kind !== 'api') return;
     if (text) logEvent('info', text);
     App.src.control(action, prm).catch((e) => showError(`Управление воспроизведением: ${e.message || e}`));
   }
 
+  /** Пауза или продолжение воспроизведения. */
   function togglePlay() {
     App.playing = !App.playing;
     syncPlay();
@@ -258,12 +259,14 @@
     b.setAttribute('aria-label', App.playing ? 'Пауза' : 'Пуск');
   }
 
+  /** Меняет скорость воспроизведения. */
   function setSpeed(s) {
     App.speed = s;
     document.querySelectorAll('#speed button').forEach((b) => b.classList.toggle('on', +b.dataset.speed === s));
     if (App.dmap) App.dmap.moveMs = s >= 300 ? 0 : s >= 60 ? 300 : 900;
   }
 
+  /** Перематывает воспроизведение в браузере на момент t. */
   function jump(t) {
     App.now = Math.max(App.meta.day_start, Math.min(App.meta.day_end, t));
     if (App.linkDownSince != null && App.linkDownSince > App.now) App.linkDownSince = App.now;
@@ -271,6 +274,7 @@
     App.dirty = true;
   }
 
+  /** Имитирует обрыв связи или восстанавливает её. */
   function toggleLink() {
     if (apiReplay()) {
       App.apiLinkDown = !App.apiLinkDown;
@@ -291,6 +295,7 @@
     $('btn-link').textContent = down ? 'Восстановить связь' : 'Обрыв связи';
   }
 
+  /** Подключает кнопки, клавиши и клики по карточкам. */
   function initControls() {
     const isReplay = App.src.kind === 'replay';
     const canControl = isReplay || apiReplay();
@@ -325,7 +330,7 @@
     scrub.addEventListener('change', () => {
       App.dragging = false;
       logEvent('info', `Демо: перемотка на ${U.time(+scrub.value)}`);
-      // В backend перемотка = перезапуск воспроизведения с нового времени.
+      // в backend перемотка это запуск воспроизведения заново с нового времени
       if (apiReplay()) control('start', { t: U.time(+scrub.value), speed: App.playing ? App.speed : 0 });
     });
     $('btn-link').onclick = toggleLink;
@@ -353,7 +358,6 @@
       if (e.code === 'ArrowLeft' && isReplay) jump(App.now - 300);
     });
 
-    // Делегирование кликов: карточки, кнопки «В работу» / «Подробнее», фильтры сводки.
     document.addEventListener('click', (e) => {
       const ack = e.target.closest('[data-ack]');
       if (ack) {
@@ -387,6 +391,7 @@
     });
   }
 
+  /** Переключает вкладку правой панели. */
   function setTab(tab) {
     App.tab = tab;
     document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
@@ -394,6 +399,7 @@
     App.dirty = true;
   }
 
+  /** Выбирает ТС или снимает выбор при повторном клике. */
   function select(tr) {
     App.sel = App.sel === tr ? null : tr;
     App.selChanged = true;
@@ -409,18 +415,17 @@
         pts = App.net.sectionPath(App.sel, visits, i, j, v && v.route_pattern_id);
       }
       if (v) pts.push([v.lat, v.lon]);
-      // Приближаем после открытия нижней панели, иначе участок уйдёт за её край.
+      // приближаем после открытия панели, иначе участок уйдёт под неё
       setTimeout(() => { App.dmap.resize(); App.dmap.focus(pts); }, 120);
     }
   }
-
-  // ------------------------------------------------------------------ карта (отрисовка — js/map.js)
 
   function themeName() {
     return getComputedStyle(document.documentElement).colorScheme === 'dark' ? 'dark' : 'light';
   }
   App.themeName = themeName;
 
+  /** Создаёт карту и подписки на выбор ТС. */
   function initMap() {
     App.dmap = new DashMap('map', App.net, {
       onSelect: (tr) => select(tr),
@@ -435,6 +440,7 @@
       '<span class="row extra"><span class="line dash"></span>нет GPS-геометрии</span>';
   }
 
+  /** Подсказка к маршруту. */
   function routeTooltip(r) {
     if (!r) return '';
     const p = App.snap && App.snap.predictions.get(r.tr_id);
@@ -442,6 +448,7 @@
       (p ? `${U.sevBadge(p.severity)} ${plainDelay(p.prediction_delay_s)}` : '<span class="muted">сейчас не на линии</span>');
   }
 
+  /** Подсказка к маркеру ТС. */
   function vehTooltip(tr) {
     const s = App.snap;
     const v = s.vehicles.find((x) => x.tr_id === tr);
@@ -450,7 +457,6 @@
     const r = App.net.routeByTr.get(tr);
     let h = `<b>ТС ${tr}</b>${r ? ` · ${U.esc(r.name)}` : ' · <span class="muted">нет расписания</span>'}<br>` +
       `${U.num(v.speed)} км/ч · данные ${U.dur(v.data_age_s)} назад`;
-    // Точность позиции: съехал ли автобус с маршрута и насколько надёжно совпадение с планом.
     if (v.off_route) h += `<br><span class="sev" style="color:var(--warn)">съехал с маршрута</span>`;
     else if (v.position_quality === 'matched') h += `<br><span class="sev" style="color:var(--ok)">на маршруте</span>`;
     else if (v.position_quality) h += `<br><span class="sev" style="color:var(--muted)">позиция ${v.position_quality}</span>`;
@@ -458,11 +464,12 @@
     return h;
   }
 
-  // Устаревшие данные (нет свежих пакетов) — не то же самое, что упрощённый прогноз (нет ML).
+  // устаревшие данные это отсутствие свежих пакетов, а не упрощённый прогноз без ML
   function isStale(p, v) {
     return (p && p.status === 'stale') || (v && v.status !== 'live');
   }
 
+  /** HTML маркера ТС: стрелка курса, цвет риска и подпись с прогнозом. */
   function vehHtml(v, p, sel) {
     const sev = p ? p.severity : 'unknown';
     const col = App.colors[sev];
@@ -479,10 +486,9 @@
   }
 
   /**
-   * Где ТС на плане: индекс последней пройденной остановки и цели прогноза.
-   * Пройдена — если прибытие уже зафиксировано (факт / детектор прибытий) или ожидаемое время
-   * прибытия (план + ожидаемое отклонение) прошло больше минуты назад. Одного планового времени
-   * мало: опаздывающий автобус до «плановой» остановки ещё не доехал.
+   * Где ТС на плане: последняя пройденная остановка и цель прогноза.
+   * Остановка пройдена, если прибытие уже засекли или ожидаемое время прибытия прошло больше
+   * минуты назад. По одному плану нельзя: опаздывающий автобус до неё ещё не доехал.
    */
   function progress(visits, p, now, dataNow) {
     const n = visits.plan.length;
@@ -498,9 +504,9 @@
     }
     return { n, last, ti };
   }
-  App._progress = progress; // для автопроверки
+  App._progress = progress;
 
-  /** Ожидаемое отклонение на k-й остановке: от текущего к прогнозу на цели. */
+  /** Ожидаемое отклонение на k-й остановке: между текущим и прогнозом на цели. */
   function expectedDelay(visits, p, k, ti, now) {
     if (!p) return null;
     const c0 = p.cur_dev_s != null ? p.cur_dev_s : 0;
@@ -510,7 +516,7 @@
     return c0 + (p.prediction_delay_s - c0) * Math.max(0, Math.min(1, f));
   }
 
-  /** Состояние остановок выбранного маршрута для карты: пройдена / впереди / цель / после цели. */
+  /** Состояние остановок выбранного маршрута: пройдена, впереди, цель или после цели. */
   function stopStates(tr, s) {
     const out = new Map();
     const visits = App.src.schedule(tr);
@@ -540,6 +546,7 @@
     return out;
   }
 
+  /** Обновляет карту: цвета маршрутов, проблемные участки, остановки и ТС. */
   function renderMap(s) {
     const dm = App.dmap;
     if (!dm || !dm.map) return;
@@ -554,8 +561,7 @@
     dm.setActivePatterns(activePatterns);
     dm.setRoutes(sev, App.sel);
 
-    // Проблемные участки: от последней пройденной остановки до целевой.
-    // В режиме API расписание подгружается асинхронно, поэтому раз в ~16 с участки пересобираются.
+    // с backend расписание приходит не сразу, поэтому участки пересобираем примерно раз в 16 секунд
     const alerts = [...s.predictions.values()].filter((p) => ALERT[p.severity] || p.tr_id === App.sel);
     const ssig = alerts.map((p) => `${p.tr_id}:${p.segment.from_stop_id}:${p.segment.to_stop_id}:${p.severity}:${p.status}:${p.prediction_delay_s}:${activePatterns.get(p.tr_id) || ''}`).join('|') +
       `|${App.sel}|${App.src.kind === 'api' ? Date.now() >> 14 : ''}`;
@@ -570,8 +576,7 @@
         list.push({
           tr: p.tr_id, sev: p.severity, stale: p.status === 'stale', dim: App.sel != null && App.sel !== p.tr_id,
           paths: App.net.sectionPaths(p.tr_id, visits, i, j, activePatterns.get(p.tr_id)),
-          // Целевая остановка выбранного ТС выделяется в слое остановок; у остальных ТС маркер цели
-          // не рисуется: прогноз скользящий, и цели прыгали бы по карте.
+          // цель выбранного ТС видна среди остановок, а у остальных не рисуем: цель сдвигается с прогнозом
           target: null,
         });
       }
@@ -617,9 +622,7 @@
     }
   }
 
-  // ------------------------------------------------------------------ шапка, баннер, сводка
-
-  /** «+2:13» -> «опоздает на 2 мин 13 с» / «раньше на 1 мин». */
+  /** Отклонение словами: опоздает на 2 мин 13 с или раньше на 1 мин. */
   function plainDelay(d) {
     if (d == null || isNaN(d)) return '';
     const a = Math.round(Math.abs(d)), m = Math.floor(a / 60), s = a % 60;
@@ -630,13 +633,14 @@
   }
   App.plainDelay = plainDelay;
 
+  /** Шапка: часы и свежесть данных. */
   function renderTop(s) {
     if (!App.dragging) $('clock-time').textContent = U.time(App.now, true);
     $('clock-date').textContent = U.date(App.now);
     if (!$('playback').hidden && !App.dragging) $('scrub').value = App.now;
     const m = s.metrics || {};
-    // Свежесть по часам источника: в LIVE часы дашборда между опросами экстраполируются
-    // (при ускоренном воспроизведении — на минуты вперёд), поэтому берём now из ответа backend.
+    // Свежесть считаем по часам backend: наши часы между опросами идут сами
+    // и при ускоренном воспроизведении убегают на минуты вперёд.
     const srcNow = App.src.kind === 'api' && m.now ? m.now : App.now;
     const lastAge = m.last_packet_at ? Math.max(0, srcNow - m.last_packet_at) : null;
     let text, cls;
@@ -655,6 +659,7 @@
     if (mode !== App.html.mode) { App.html.mode = mode; $('mode-badge').textContent = mode; }
   }
 
+  /** Баннер о проблемах: нет связи, данные устарели, модель недоступна. */
   function renderBanner(s) {
     const b = $('banner');
     let html = '', ok = false;
@@ -705,13 +710,12 @@
     if (html !== App.html.status) { App.html.status = html; $('statusbar').innerHTML = html; }
   }
 
-  // ------------------------------------------------------------------ «Требуют внимания» и «Маршруты»
-
   function routeName(tr) {
     const r = App.net.routeByTr.get(tr);
     return r ? r.name : 'маршрут не восстановлен';
   }
 
+  /** Карточка инцидента в списке «Требуют внимания». */
   function attentionCard(i) {
     const sev = i.severity;
     const color = U.SEV[sev].color;
@@ -749,6 +753,7 @@
       `<button class="ghost sm" data-expand="${i.incident_id}">${open ? 'Свернуть ▴' : 'Подробнее ▾'}</button></div></div>`;
   }
 
+  /** Строка инцидента, который уже взяли в работу. */
   function workRow(i) {
     return `<div class="wrow" style="--c:${U.SEV[i.severity].color}" data-tr="${i.tr_id}">${U.sevIcon(i.severity, 13)}` +
       `<span class="w-tr">ТС ${i.tr_id}</span><span class="w-d num">${U.delay(i.prediction_delay_s)}</span>` +
@@ -756,9 +761,10 @@
       `<button class="linkbtn" data-ack="${i.incident_id}" data-tr="${i.tr_id}">вернуть</button></div>`;
   }
 
+  /** Список «Требуют внимания». */
   function renderAttention(s) {
     const act = s.incidents.filter((i) => i.status === 'active');
-    // Сначала те, где событие раньше и опоздание больше; «стабилизируется» — в конце.
+    // выше то, что случится раньше и с большим опозданием, стабилизирующиеся в конце
     const score = (i) => (i.severity === 'ok' ? -1e6 : U.SEV[i.severity].rank * 1e4 - Math.max(0, i.target_time_begin - App.now));
     const todo = act.filter((i) => !App.ack.has(i.incident_id)).sort((a, b) => score(b) - score(a));
     const work = act.filter((i) => App.ack.has(i.incident_id));
@@ -769,6 +775,7 @@
     if (html !== App.html.att) { App.html.att = html; $('tab-attention').innerHTML = html; }
   }
 
+  /** Список маршрутов, самые проблемные сверху. */
   function renderRoutes(s) {
     const vById = new Map(s.vehicles.map((v) => [v.tr_id, v]));
     let rows = App.net.routes.map((r) => ({ r, p: s.predictions.get(r.tr_id), v: vById.get(r.tr_id) }));
@@ -792,8 +799,7 @@
     if (html !== App.html.routes) { App.html.routes = html; $('tab-routes').innerHTML = html; }
   }
 
-  // ------------------------------------------------------------------ карточка ТС (нижняя панель)
-
+  /** Создаёт график отставания в панели ТС. */
   function initCharts() {
     App.devChart = echarts.init($('chart-dev'), null, { renderer: 'canvas' });
     new ResizeObserver(() => App.devChart.resize()).observe($('chart-dev'));
@@ -811,6 +817,7 @@
     };
   }
 
+  /** Нижняя панель выбранного ТС: остановки, график и объяснение прогноза. */
   function renderDrawer(s) {
     const tr = App.sel;
     const drawer = $('drawer');
@@ -831,7 +838,6 @@
     const now = App.now, dataNow = s.dataNow != null ? s.dataNow : now;
     const inc = s.incidents.find((i) => i.tr_id === tr && i.status === 'active');
 
-    // Шапка: кто и главное одной фразой.
     const sev = p ? p.severity : 'unknown';
     let line2;
     if (p) {
@@ -850,7 +856,6 @@
       `<div class="dh-2">${line2}</div>`;
     if (head !== App.html.dhead) { App.html.dhead = head; $('drawer-head').innerHTML = head; }
 
-    // Ближайшие остановки: пройденные — с фактом, впереди — план и ожидаемое время.
     let strip = '<div class="empty">Расписание загружается…</div>';
     if (visits) {
       const { n, last, ti } = progress(visits, p, now, dataNow);
@@ -881,7 +886,6 @@
     }
     if (strip !== App.html.strip) { App.html.strip = strip; $('strip').innerHTML = strip; }
 
-    // Почему так считаем: гипотеза, рекомендация, признаки.
     const src = inc || p;
     let ev = '<div class="empty">Нет прогноза</div>';
     if (src) {
@@ -897,7 +901,6 @@
     }
     if (ev !== App.html.ev) { App.html.ev = ev; $('evidence').innerHTML = ev; }
 
-    // График обновляем не чаще раза в секунду.
     const t = performance.now();
     if (!App.selChanged && t - App.lastCharts < 1000) return;
     App.lastCharts = t;
@@ -949,13 +952,12 @@
     }, true);
   }
 
-  // ------------------------------------------------------------------ цикл отрисовки
-
+  /** Перерисовывает текущий экран по новому состоянию. */
   function update(force) {
     const s = App.src.snapshot(App.now, App.linkDownSince);
     App.snap = s;
     if (App.src.restarts && App.src.restarts !== App.seenRestarts) {
-      // Backend начал воспроизведение заново: связь там восстановлена, история страницы сброшена.
+      // backend начал воспроизведение заново, там и связь уже восстановлена
       App.seenRestarts = App.src.restarts;
       App.apiLinkDown = false;
       App.restoredAt = null;
@@ -978,7 +980,7 @@
       }
       renderDrawer(s);
     } else if (force || performance.now() - App.lastPage > 1500) {
-      // Аналитика и журнал пересчитываются реже: там сотни и тысячи записей.
+      // аналитику и журнал считаем реже, там тысячи записей
       App.lastPage = performance.now();
       const v = window.Views[App.view];
       if (v && v.render) v.render(App, s);

@@ -1,3 +1,5 @@
+"""Точка входа FastAPI: приложение, CORS и маршруты API."""
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -18,7 +20,7 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Справочные данные: сеть маршрутов и плановое расписание.
+    """Загружает справочники и запускает воспроизведение дня, при выключении всё останавливает."""
     pipeline.network.load()
     pipeline.load_spatial()
     pipeline.replay = ReplayFeeder(pipeline)
@@ -41,7 +43,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Разрешаем CORS для дашборда
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -56,6 +57,7 @@ app.include_router(ws_router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():
+    """Отвечает, что сервис работает, и подсказывает, где документация API."""
     return {
         "status": "online",
         "service": settings.PROJECT_NAME,

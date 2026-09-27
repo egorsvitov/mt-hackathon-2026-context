@@ -2,13 +2,13 @@ from pydantic import BaseModel, Field
 
 
 class RawNDTPRecord(BaseModel):
-    """Сырая запись телеметрии после парсинга NDTP (ячейка G6CellNav00) или из CSV replay."""
+    """Одна точка телеметрии после разбора NDTP или из воспроизведения CSV."""
 
     tr_id: str = Field(..., description="Идентификатор ТС (vehicle_id / tr_id)")
     timestamp: int = Field(
         ..., description="Время замера (event_time), Unix epoch, секунды"
     )
-    lat: float | None = Field(None, description="Широта; нет — координаты невалидны")
+    lat: float | None = Field(None, description="Широта, пусто при невалидных координатах")
     lon: float | None = Field(None, description="Долгота")
     speed: float | None = Field(None, description="Текущая скорость км/ч")
     heading: float | None = Field(None, description="Курс, градусы")
@@ -22,10 +22,7 @@ class RawNDTPRecord(BaseModel):
 
 
 class MLFeaturesPayload(BaseModel):
-    """Пакет признаков, отправляемый в ML-модуль под задачу прогноза.
-
-    Все признаки посчитаны только по данным с event_time <= t_timestamp.
-    """
+    """Признаки для ML-сервиса на момент прогноза. Все посчитаны по данным не позже t_timestamp."""
 
     tr_id: str
     t_timestamp: int = Field(..., description="Момент прогноза T, epoch")
@@ -62,7 +59,7 @@ class MLFeaturesPayload(BaseModel):
     remaining_visits: int | None = None
     hour: float | None = None
 
-    # --- полный набор признаков модели (24 шт., см. ml_models/.../manifest.json) ---
+    # ниже полный набор из 24 признаков модели, см. manifest.json в ml_models
     cur_dev_s: float | None = Field(
         None, description="Алиас current_delay_sec в именах модели"
     )

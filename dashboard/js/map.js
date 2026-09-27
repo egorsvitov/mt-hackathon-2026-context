@@ -1,21 +1,19 @@
-/* Карта на MapLibre GL.
-   Подложка — вырезка OpenStreetMap в локальном файле data/basemap/moscow.pmtiles (стиль Protomaps,
-   шрифты и иконки в vendor/protomaps), поэтому карта работает без интернета и без ключей.
-   Поверх подложки — наши слои: маршруты (цвет риска), проблемные участки, целевые остановки,
-   остановки выбранного маршрута и маркеры ТС. Содержимое подсказок и маркеров задаёт app.js. */
+/* Карта на MapLibre GL. Подложка лежит локально в data/basemap/moscow.pmtiles, поэтому карта
+   работает без интернета и ключей. Поверх неё маршруты, проблемные участки, остановки и ТС. */
 (function () {
   'use strict';
 
   const BASEMAP_URL = 'data/basemap/moscow.pmtiles';
   const FLAVOR = { dark: 'black', light: 'grayscale' };
-  const HIDDEN_BASE_LAYERS = new Set(['pois', 'roads_shields']); // спокойная подложка для диспетчера
+  const HIDDEN_BASE_LAYERS = new Set(['pois', 'roads_shields']);
   const ATTRIBUTION = '© <a href="https://www.openstreetmap.org/copyright" target="_blank">участники OpenStreetMap</a> · ' +
     '<a href="https://protomaps.com" target="_blank">Protomaps</a>';
 
   const pageBase = () => location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '');
-  const lngLat = (p) => [p[1], p[0]]; // [lat, lon] -> [lon, lat]
+  const lngLat = (p) => [p[1], p[0]]; // у нас [lat, lon], у MapLibre наоборот
   const fc = (features) => ({ type: 'FeatureCollection', features });
 
+  /** Линии маршрутов для карты. Если у ТС известно направление рейса, рисуем только его. */
   function buildRoutes(net, activePatterns) {
     const features = [];
     for (const r of net.routes) {
@@ -36,11 +34,7 @@
   }
 
   class DashMap {
-    /**
-     * @param el      id или элемент контейнера
-     * @param net     Network (util.js)
-     * @param h       {onSelect(tr), routeTooltip(tr) -> html, vehTooltip(tr) -> html}
-     */
+    /** el это контейнер карты, h даёт обработчик выбора ТС и тексты подсказок. */
     constructor(el, net, h) {
       this.el = typeof el === 'string' ? document.getElementById(el) : el;
       this.net = net;
@@ -55,7 +49,7 @@
       this.activePatterns = new Map();
       this.patternSignature = '';
       this.routes = buildRoutes(net, this.activePatterns);
-      // Подложка из PMTiles читается HTTP Range-запросами: с file:// это невозможно.
+      // PMTiles читается Range-запросами, с file:// это не работает
       this.basemap = location.protocol !== 'file:' && !!window.pmtiles && !!window.basemaps;
       this.basemapStatus = this.basemap ? 'loading' : 'file';
       const b = new maplibregl.LngLatBounds();
@@ -63,7 +57,7 @@
       this.bounds = b.isEmpty() ? new maplibregl.LngLatBounds([37.3, 55.55], [37.9, 55.95]) : b;
     }
 
-    /** Создать карту. false — WebGL недоступен. */
+    /** Создаёт карту, возвращает false, если нет WebGL. */
     init(theme, colors) {
       this.theme = theme;
       this.colors = colors;
@@ -98,6 +92,7 @@
       return true;
     }
 
+    /** Стиль карты: подложка Protomaps в нужной теме или пустой фон. */
     style() {
       const base = pageBase();
       const flavor = FLAVOR[this.theme] || 'black';
@@ -113,7 +108,7 @@
       return style;
     }
 
-    /** Наши источники и слои; вызывается после каждой смены стиля (тема). */
+    /** Добавляет наши слои. Вызывается заново после смены темы. */
     addOverlays() {
       const m = this.map, C = this.colors;
       m.addSource('routes', { type: 'geojson', data: this.routes });
@@ -143,7 +138,7 @@
         id: 'routes-selected', type: 'line', source: 'routes', filter: ['all', selFilter, ['!', ['get', 'dashed']]], layout: round,
         paint: { 'line-color': bySev(fsev), 'line-width': 5, 'line-opacity': 0.9 },
       });
-      // Невидимая широкая линия — чтобы по тонкому маршруту было легко попасть курсором.
+      // невидимая широкая линия, чтобы по тонкому маршруту было легко попасть мышью
       m.addLayer({ id: 'routes-hit', type: 'line', source: 'routes', paint: { 'line-width': 14, 'line-opacity': 0 } });
       m.addLayer({
         id: 'sections-halo', type: 'line', source: 'sections', layout: round,
@@ -157,8 +152,7 @@
         id: 'sections-stale', type: 'line', source: 'sections', filter: ['get', 'stale'],
         paint: { 'line-color': bySev(['get', 'sev']), 'line-width': 6, 'line-dasharray': [1.4, 1], 'line-opacity': ['case', ['get', 'dim'], 0.3, 0.9] },
       });
-      // Остановки — поверх линии участка, иначе ближайшие прячутся под ней.
-      // state: passed — пройдена; next — впереди до цели; target — цель прогноза; after — после цели; other — прочие.
+      // остановки кладём поверх участка, иначе ближайшие прячутся под линией
       const st = ['coalesce', ['get', 'state'], 'other'];
       m.addLayer({
         id: 'stops', type: 'circle', source: 'stops',
@@ -192,6 +186,7 @@
       this.ready = true;
     }
 
+    /** Клики и подсказки на маршрутах, остановках и участках. */
     bindEvents() {
       const m = this.map;
       this.eventsBound = true;
@@ -215,11 +210,13 @@
       });
     }
 
+    /** Обновляет данные источника, если карта уже готова. */
     setSource(id, data) {
       this.data[id] = data;
       if (this.ready && this.map.getSource(id)) this.map.getSource(id).setData(data);
     }
 
+    /** Перестраивает линии, когда меняются направления рейсов ТС. */
     setActivePatterns(patterns) {
       const signature = [...patterns].sort((a, b) => a[0] - b[0]).map((x) => `${x[0]}:${x[1] || ''}`).join('|');
       if (signature === this.patternSignature) return;
@@ -230,7 +227,7 @@
       this.setSource('routes', this.routes);
     }
 
-    /** sev: Map(tr_id -> severity); sel — выбранное ТС или null. */
+    /** Красит маршруты по уровню риска и выделяет выбранное ТС. */
     setRoutes(sev, sel) {
       if (!this.map) return;
       if (sel !== this.sel) {
@@ -248,7 +245,7 @@
       }
     }
 
-    /** list: [{tr, path: [[lat, lon]], sev, stale, dim, target: {lat, lon, html}}] */
+    /** Проблемные участки: от последней пройденной остановки до целевой. */
     setSections(list) {
       const lines = [], points = [];
       for (const s of list) {
@@ -266,8 +263,7 @@
       this.setSource('targets', fc(points));
     }
 
-    /** list: [{lat, lon, name}]; small — мельче, когда показаны все остановки сети. */
-    /** list: [{lat, lon, name, state?, label?, tip?, color?}]; small — мельче, когда показаны все остановки сети. */
+    /** Остановки на карте. small делает их мельче, когда показаны все остановки сети. */
     setStops(list, small) {
       this.setSource('stops', fc(list.map((s) => {
         const props = { name: s.name, r: small ? 2.5 : 3.5, state: s.state || 'other' };
@@ -278,7 +274,7 @@
       })));
     }
 
-    /** list: [{tr, lat, lon, html, z, sel, big, clickable}] — маркеры ТС (HTML поверх карты). */
+    /** Маркеры ТС: создаёт новые, двигает существующие и убирает пропавшие. */
     setVehicles(list) {
       if (!this.map) return;
       const now = performance.now();
@@ -316,7 +312,7 @@
       this.snap = false;
     }
 
-    /** Плавное движение маркеров между отметками; вызывается в каждом кадре. */
+    /** Плавно двигает маркеры между отметками, вызывается каждый кадр. */
     animate(now) {
       for (const mk of this.markers.values()) {
         if (mk.done) continue;
@@ -327,9 +323,10 @@
       }
     }
 
-    /** Следующее обновление — без анимации (перемотка). */
+    /** Следующее обновление без анимации, например после перемотки. */
     snapNext() { this.snap = true; }
 
+    /** Меняет тему карты. */
     setTheme(theme, colors) {
       if (!this.map || theme === this.theme && colors === this.colors) return;
       this.theme = theme;
@@ -339,13 +336,14 @@
       this.map.setStyle(this.style(), { diff: false });
     }
 
+    /** Показывает всю сеть. */
     fitNetwork() {
       if (!this.map) return;
       this.map.resize();
       this.map.fitBounds(this.bounds, { padding: 24, animate: false });
     }
 
-    /** Показать участок: points — [[lat, lon], ...]. */
+    /** Приближает карту к набору точек. */
     focus(points) {
       if (!this.map || !points.length) return;
       const b = new maplibregl.LngLatBounds();

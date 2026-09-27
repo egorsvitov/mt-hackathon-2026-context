@@ -1,11 +1,11 @@
-"""Запуск дашборда одной командой, без Docker и без внешних зависимостей.
+"""Запуск дашборда одной командой, без Docker и внешних зависимостей.
 
-    python dashboard/serve.py                 # http://127.0.0.1:8080, режим REPLAY
+    python dashboard/serve.py                 # http://127.0.0.1:8080, воспроизведение в браузере
     python dashboard/serve.py --open          # и открыть в браузере
     python dashboard/serve.py --api http://127.0.0.1:8000/api/v1   # сразу подключиться к backend
 
-Отличие от ``python -m http.server``: поддержаны HTTP Range-запросы, без которых браузер
-не может читать подложку карты из ``data/basemap/moscow.pmtiles``.
+В отличие от python -m http.server поддерживает Range-запросы, без них браузер не прочитает
+подложку карты из data/basemap/moscow.pmtiles.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)$")
 
 
 class RangeHandler(SimpleHTTPRequestHandler):
-    """Статика с поддержкой ``Range: bytes=a-b`` (ответ 206 Partial Content)."""
+    """Раздаёт статику и умеет отвечать на Range-запросы (206 Partial Content)."""
 
     extensions_map = {
         **SimpleHTTPRequestHandler.extensions_map,
@@ -34,16 +34,19 @@ class RangeHandler(SimpleHTTPRequestHandler):
         ".pmtiles": "application/octet-stream",
     }
 
-    def log_message(self, fmt, *args):  # тихий режим: сотни Range-запросов засоряют консоль
+    def log_message(self, fmt, *args):
+        """Не пишем каждый запрос в консоль, их сотни."""
         pass
 
     def end_headers(self):
+        """Добавляет заголовки против кэша и для Range."""
         self.send_header("Accept-Ranges", "bytes")
         if self.path.split("?")[0].endswith("config.js"):
             self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
     def send_head(self):
+        """Отдаёт заголовки, для Range-запроса только нужный кусок файла."""
         self._remaining = None
         rng = self.headers.get("Range")
         path = self.translate_path(self.path)
@@ -77,6 +80,7 @@ class RangeHandler(SimpleHTTPRequestHandler):
         return f
 
     def copyfile(self, source, outputfile):
+        """Копирует в ответ весь файл или запрошенный диапазон байт."""
         if self._remaining is None:
             return super().copyfile(source, outputfile)
         left = self._remaining
@@ -89,14 +93,17 @@ class RangeHandler(SimpleHTTPRequestHandler):
 
 
 class Server(ThreadingHTTPServer):
+    """HTTP-сервер, каждый запрос в своём потоке."""
     daemon_threads = True
 
     def handle_error(self, request, client_address):
-        # Браузер обрывает ненужные Range-запросы при перемещении карты — это не ошибка.
+        # браузер сам обрывает лишние Range-запросы, когда двигают карту
+        """Оборванные соединения не считаем ошибками."""
         pass
 
 
 def main():
+    """Разбирает аргументы, находит свободный порт и запускает сервер."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8080)
@@ -124,7 +131,7 @@ def main():
             srv = Server((args.host, port), handler)
             break
         except OSError as e:
-            # Порт занят другим процессом (на Windows Docker даёт WinError 10013, а не 10048).
+            # на Windows занятый Docker порт даёт WinError 10013, а не 10048
             print(f"Порт {port} занят ({e.strerror or e}), пробую {port + 1}", flush=True)
     if srv is None:
         raise SystemExit(f"Нет свободного порта в диапазоне {args.port}–{args.port + 19}: укажите --port")

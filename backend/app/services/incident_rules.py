@@ -1,32 +1,24 @@
-"""Правила уровня риска, гипотез о причине и рекомендаций для диспетчера.
+"""Уровень риска, причина отклонения и рекомендация диспетчеру.
 
-Модуль не зависит от pandas и может быть перенесён в backend как есть:
-на вход — признаки на момент прогноза ``T`` (только данные с ``event_time <= T``)
-и прогноз модели, на выход — поля ``severity``, ``reason``, ``evidence``,
-``recommendation`` контракта ``Prediction``/``Incident`` (см. ``dashboard/CONTRACT.md``).
-
-Причины формулируются как гипотезы, подкреплённые наблюдаемыми признаками:
-в данных нет дверей, пробок и ДТП, поэтому утверждать их нельзя.
+Причина здесь гипотеза по наблюдаемым признакам: в данных нет дверей, пробок и ДТП,
+поэтому утверждать их нельзя.
 """
 
 from __future__ import annotations
 
 import math
 
-# Пороги уровня риска, секунды. Граница «опоздание» совпадает с target_class
-# организаторов (late > +120 c, early < −60 c).
+# пороги в секундах, опоздание и опережение совпадают с классами в разметке организаторов
 THRESHOLDS = {
-    "early": -60.0,  # prediction <= early    -> опережение
-    "warning": 60.0,  # prediction >= warning  -> риск (жёлтый)
-    "critical": 120.0,  # prediction >= critical -> опоздание (красный)
+    "early": -60.0,
+    "warning": 60.0,
+    "critical": 120.0,
 }
 
-STOP_ZONE_M = 150  # дальше от остановки — стоянка «вне остановочного пункта» (с запасом на погрешность GPS)
+STOP_ZONE_M = 150  # дальше этого стоянка считается не на остановке (с запасом на погрешность GPS)
 
 SEVERITY_ORDER = {"critical": 3, "warning": 2, "early": 1, "ok": 0, "unknown": -1}
 
-# Какие признаки показываются в карточке как доказательства.
-# feature/norm_feature — имена признаков на момент T.
 EVIDENCE_SPEC = [
     {
         "code": "speed_5m",
@@ -72,7 +64,6 @@ EVIDENCE_SPEC = [
     },
 ]
 
-# Справочник причин: заголовок, какие доказательства подсвечивать, рекомендация.
 REASONS = {
     "NO_GPS": {
         "title": "Нет свежих данных GPS",
@@ -123,7 +114,7 @@ REASONS = {
 
 
 def severity_of(prediction_s: float | None) -> str:
-    """Уровень риска по прогнозу задержки: ok / warning / critical / early / unknown."""
+    """Уровень риска по прогнозу задержки: ok, warning, critical, early или unknown."""
     p = _num(prediction_s)
     if p is None:
         return "unknown"
@@ -137,6 +128,7 @@ def severity_of(prediction_s: float | None) -> str:
 
 
 def _num(x):
+    """Число из признака или None, если его нет или оно не конечное."""
     if x is None:
         return None
     try:
@@ -147,6 +139,7 @@ def _num(x):
 
 
 def _mmss(seconds: float) -> str:
+    """Секунды в виде 3 мин 05 с для текста причины."""
     seconds = int(round(abs(seconds)))
     m, s = divmod(seconds, 60)
     return f"{m} мин {s:02d} с" if m else f"{s} с"
@@ -155,11 +148,10 @@ def _mmss(seconds: float) -> str:
 def diagnose(
     features: dict, prediction_s: float, severity: str
 ) -> tuple[str | None, str | None]:
-    """Код причины и текст с цифрами, либо ``(None, None)`` для ТС в графике.
+    """Выбирает причину отклонения по признакам на момент T.
 
-    ``features`` — признаки на момент T: ``cur_dev_s``, ``dev_trend_15m_s``,
-    ``speed_5m_kmh``, ``speed_norm_kmh``, ``stationary_s``, ``near_stop_m``,
-    ``gps_age_s``, ``required_speed_kmh``. Пропуски допустимы (``None``/NaN).
+    Возвращает код причины и текст с цифрами или (None, None), если ТС идёт по графику.
+    Любого признака может не быть, это нормально.
     """
     if severity in ("ok", "unknown"):
         return None, None
@@ -236,7 +228,7 @@ def diagnose(
 
 
 def evidence(features: dict, reason_code: str | None) -> list[dict]:
-    """Список доказательств для карточки; ``flag`` — признак, на котором основана гипотеза."""
+    """Признаки для карточки инцидента. flag отмечает те, на которых основана причина."""
     flags = set(REASONS[reason_code]["flags"]) if reason_code else set()
     out = []
     for spec in EVIDENCE_SPEC:

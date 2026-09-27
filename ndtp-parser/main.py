@@ -51,10 +51,12 @@ def handle_frame(
 
 
 def main() -> None:
+    """Загружает соответствие unit_id и tr_id и запускает TCP-сервер."""
     mapping = load_unit_mapping(MAPPING_PATH)
     adapter = TrafficAdapter(mapping)
 
     def on_frame(frame: bytes, receive_time: datetime) -> None:
+        """Обрабатывает один кадр от устройства."""
         handle_frame(frame, receive_time, adapter)
 
     run_server(HOST, PORT, on_frame)

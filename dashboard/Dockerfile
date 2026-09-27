@@ -1,10 +1,9 @@
-# Дашборд диспетчера: статика на nginx (карта и подложка — локальные, без внешних запросов).
-# Подложка карты скачивается автоматически при сборке образа.
+# Дашборд: статика на nginx. Подложку карты качаем при сборке, дальше всё работает без интернета.
 FROM python:3.11-alpine AS builder
 
 WORKDIR /app
 COPY tools/fetch_basemap.py tools/fetch_basemap.py
-# Установка bash/curl и выполнение скрипта скачивания (go-pmtiles требует немного системных либ)
+# curl и tar нужны скрипту скачивания подложки
 RUN apk add --no-cache curl tar gzip && python tools/fetch_basemap.py --out /app/moscow.pmtiles
 
 FROM nginx:1.27-alpine
