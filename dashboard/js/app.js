@@ -91,6 +91,7 @@
     initControls();
     initCharts();
     for (const v of Object.values(window.Views)) if (v.init) v.init(App);
+    window.Measures.init(App);
     logEvent('ok', App.src.kind === 'api'
       ? `Дашборд подключён к backend (${App.src.base})`
       : `Дашборд запущен в режиме воспроизведения${App.fallbackReason ? ' — backend недоступен' : ''}`);
@@ -355,6 +356,10 @@
 
     // Делегирование кликов: карточки, кнопки «В работу» / «Подробнее», фильтры сводки.
     document.addEventListener('click', (e) => {
+      const ms = e.target.closest('[data-measure]');
+      if (ms) { window.Measures.open(ms.dataset.measure, +ms.dataset.tr); return; }
+      const mc = e.target.closest('[data-cancel-measure]');
+      if (mc) { window.Measures.cancel(+mc.dataset.cancelMeasure); return; }
       const ack = e.target.closest('[data-ack]');
       if (ack) {
         const id = ack.dataset.ack;
@@ -706,6 +711,18 @@
     return r ? r.name : 'маршрут не восстановлен';
   }
 
+  function measureButtons(tr) {
+    return `<button class="ghost sm" data-measure="reserve" data-tr="${tr}" title="Резервный автобус возьмёт рейс с ближайшей остановки, к которой успевает">＋ Доп. автобус</button>` +
+      `<button class="ghost sm" data-measure="dwell" data-tr="${tr}" title="Короче стоянки на остановках и отстой на конечной">Сократить стоянки</button>`;
+  }
+
+  function measureChips(tr) {
+    const ms = window.Measures ? window.Measures.forTr(tr) : [];
+    return ms.length ? `<div class="m-chips">${ms.map((m) =>
+      `<span class="m-chip ${m.kind}" title="${U.esc(m.text)}">${m.kind === 'reserve' ? '＋ резерв' : '⏱ стоянки'}` +
+      `<button class="linkbtn" data-cancel-measure="${m.id}" title="Отменить меру">✕</button></span>`).join('')}</div>` : '';
+  }
+
   function attentionCard(i) {
     const sev = i.severity;
     const color = U.SEV[sev].color;
@@ -730,13 +747,15 @@
         `<div>По плану <b>${U.time(i.target_time_begin)}</b> → ожидается <b>${U.time(i.predicted_arrival)}</b></div>` +
         (r && !calming && r.detail ? `<div class="a-detail">${U.esc(r.detail)}</div>` : '') +
         (i.recommendation && !calming ? `<div class="rec">${U.esc(i.recommendation)}</div>` : '') +
-        `<div class="a-meta">${meta.join(' · ')}</div></div>`;
+        `<div class="a-meta">${meta.join(' · ')}</div>` +
+        (!calming ? `<div class="a-measures"><span class="muted">Меры:</span>${measureButtons(i.tr_id)}</div>` : '') + '</div>';
     }
+    const applied = measureChips(i.tr_id);
     return `<div class="acard${sel}${stale ? ' stale' : ''}" style="--c:${color}" data-tr="${i.tr_id}">` +
       `<div class="a-top"><span class="a-ic">${U.sevIcon(sev, 16)}</span>` +
       `<div class="a-main"><div class="a-title">ТС ${i.tr_id} <span class="a-route">${U.esc(routeName(i.tr_id))}</span></div>` +
       `<div class="a-when">${until > 0 ? `через <b>${U.dur(until)}</b>` : '<b>сейчас</b>'} · к «${U.esc(i.target_stop_name)}»</div>` +
-      `<div class="a-why">${U.esc(why)}${stale ? ' · <span class="muted">нет свежих данных</span>' : ''}</div></div>` +
+      `<div class="a-why">${U.esc(why)}${stale ? ' · <span class="muted">нет свежих данных</span>' : ''}</div>${applied}</div>` +
       `<div class="a-delay num">${U.delay(i.prediction_delay_s)}<small>${word}</small></div></div>` +
       `${details}<div class="a-actions">` +
       `<button class="ghost sm" data-ack="${i.incident_id}" data-tr="${i.tr_id}">В работу</button>` +
@@ -839,7 +858,8 @@
     if (p && p.cur_dev_s != null) facts.push(`сейчас ${U.delay(p.cur_dev_s)}`);
     if (v) facts.push(`${U.num(v.speed)} км/ч`, `данные ${U.dur(v.data_age_s)} назад`);
     const head = `<div class="dh-1"><span class="t">ТС ${tr}</span>${U.sevBadge(sev)}<span class="kv">${U.esc(r ? r.name : '')}</span>` +
-      `<span class="kv muted">${facts.join(' · ')}</span>` +
+      `<span class="kv muted">${facts.join(' · ')}</span>${measureChips(tr)}` +
+      `<span class="dh-actions">${visits ? measureButtons(tr) : ''}</span>` +
       `<button class="iconbtn close" data-action="close" title="Закрыть (Esc)" aria-label="Закрыть">✕</button></div>` +
       `<div class="dh-2">${line2}</div>`;
     if (head !== App.html.dhead) { App.html.dhead = head; $('drawer-head').innerHTML = head; }

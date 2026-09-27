@@ -503,3 +503,54 @@ table.jr .jr-name { max-width: 260px; overflow: hidden; text-overflow: ellipsis;
 
 .banner code { font-size: 11.5px; background: var(--surface-3); padding: 1px 5px; border-radius: 4px; }
 .banner .ghost { margin-left: auto; }
+
+/* ---------------------------------------------------------------- меры диспетчера (what-if) */
+.a-measures { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.dh-actions { display: flex; gap: 6px; margin-left: auto; }
+.dh-actions + .close { margin-left: 4px; }
+.m-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
+.m-chip {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 4px 1px 7px;
+  border-radius: 999px; background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); color: var(--text);
+}
+.m-chip.reserve { background: color-mix(in srgb, var(--ok) 16%, var(--surface-2)); }
+.m-chip .linkbtn { color: var(--muted); font-size: 10.5px; padding: 0 2px; }
+button.primary {
+  border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 8px;
+  padding: 6px 14px; font-size: 12.5px; font-weight: 600;
+}
+button.primary:disabled { opacity: .45; cursor: not-allowed; }
+
+.mdlg {
+  width: min(460px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--border-strong); border-radius: 12px;
+  background: var(--surface-2); color: var(--text); box-shadow: var(--shadow);
+}
+.mdlg::backdrop { background: rgba(0, 0, 0, .35); }
+.mdlg-head { padding: 14px 16px 4px; }
+.mdlg-head h2 { margin: 0; font-size: 15px; }
+.mdlg-body { padding: 6px 16px 4px; display: grid; gap: 10px; font-size: 12.5px; }
+.mdlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px 14px; }
+.m-ctx { margin: 0; color: var(--text-2); }
+.mf { display: grid; gap: 4px; }
+.mf-l { font-size: 11.5px; color: var(--text-2); }
+.mf-h { font-size: 11px; color: var(--muted); }
+.mf select {
+  font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 7px; padding: 6px 8px;
+}
+.m-radio { display: flex; gap: 14px; }
+.m-radio label, .m-check { display: flex; align-items: center; gap: 6px; }
+.m-radio input, .m-check input { accent-color: var(--accent); }
+.m-preview { background: var(--surface-3); border-radius: 8px; padding: 8px 10px; line-height: 1.45; }
+.m-warn { margin: 0; color: var(--crit); }
+
+/* по центру над картой: справа список инцидентов, его не закрываем */
+.toasts { position: fixed; top: 118px; left: 50%; transform: translateX(-50%); z-index: 2000; display: grid; gap: 8px; width: min(420px, calc(100vw - 32px)); }
+.toast {
+  display: flex; gap: 8px; align-items: flex-start; padding: 10px 10px 10px 12px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-left: 4px solid var(--accent);
+  box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.4; transition: opacity .35s, transform .35s;
+}
+.toast.ok { border-left-color: var(--ok); }
+.toast.hide { opacity: 0; transform: translateY(-8px); }
+.toast-body { flex: 1; }
