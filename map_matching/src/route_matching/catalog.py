@@ -367,8 +367,11 @@ def build_catalog(
     *,
     excluded_trip_ids: set[str] | None = None,
     provenance: dict | None = None,
+    mode: str = "offline_history",
 ) -> Catalog:
-    real = real_vehicle_ids(plan)
+    if mode not in {"offline_history", "static_plan_graph"}:
+        raise ValueError(f"Unknown catalog mode: {mode}")
+    real = real_vehicle_ids(plan) if mode == "offline_history" else {v.tr_id for v in plan}
     plan = tuple(v for v in plan if v.tr_id in real)
     sequences, patterns, assignments = discover_sequences(plan, config)
     excluded_trip_ids = excluded_trip_ids or set()
@@ -377,6 +380,85 @@ def build_catalog(
     assignments = tuple(a for a in assignments if a.visit_id in allowed_visits)
     used_pattern_ids = {s.route_pattern_id for s in sequences}
     patterns = tuple(p for p in patterns if p.route_pattern_id in used_pattern_ids)
+    report = {
+        "allowed_events": 0,
+        "trace_requests": 0,
+        "trace_errors": 0,
+        "route_errors": 0,
+        "unknown_segments": 0,
+        "passages": 0,
+        "error_examples": [],
+    }
+    if mode == "static_plan_graph":
+        variants = {}
+        canonical_by_pattern = {
+            pattern.route_pattern_id: min(
+                (s for s in sequences if s.route_pattern_id == pattern.route_pattern_id),
+                key=lambda s: s.sequence_id,
+            )
+            for pattern in patterns
+        }
+        for sequence in canonical_by_pattern.values():
+            routed = _osm_pattern_paths(sequence, graph, report)
+            for leg in sequence.legs:
+                variants[leg.segment_id] = tuple(
+                    Variant(digest((leg.segment_id, path.signature)), path, mode, 0, 0)
+                    for path in routed.get(leg.segment_id, ())
+                    if path.edges
+                )
+        pair_cache = {}
+        for sequence in sequences:
+            for leg in sequence.legs:
+                if leg.segment_id in variants:
+                    continue
+                pair = leg.start.coord, leg.end.coord
+                if pair not in pair_cache:
+                    try:
+                        pair_cache[pair] = graph.routes(*pair)
+                    except GraphError as exc:
+                        pair_cache[pair] = ()
+                        report["route_errors"] += 1
+                        if len(report["error_examples"]) < 5:
+                            report["error_examples"].append(str(exc))
+                variants[leg.segment_id] = tuple(
+                    Variant(digest((leg.segment_id, path.signature)), path, mode, 0, 0)
+                    for path in pair_cache[pair]
+                    if path.edges
+                )
+        report.update(
+            unknown_segments=sum(not values for values in variants.values()),
+            confirmed_segments=0,
+            patterns=len(patterns),
+            trip_occurrences=len(sequences),
+            assignments=len(assignments),
+        )
+        provenance = {
+            "policy": mode,
+            "vehicle_ids": sorted(real),
+            "trip_occurrence_ids": sorted(s.trip_occurrence_id for s in sequences),
+            "excluded_trip_occurrence_ids": sorted(excluded_trip_ids),
+            **(provenance or {}),
+        }
+        payload = {
+            "schema_version": 2,
+            "graph": graph.version,
+            "config": asdict(config),
+            "provenance": provenance,
+            "sequences": [asdict(s) for s in sequences],
+            "variants": {k: [asdict(v) for v in vs] for k, vs in sorted(variants.items())},
+        }
+        return Catalog(
+            digest(payload),
+            graph.version,
+            None,
+            sequences,
+            variants,
+            report,
+            2,
+            patterns,
+            assignments,
+            provenance,
+        )
     # Filter FIRST: even future outliers and future deduplication cannot influence the catalog.
     allowed = normalize_events(
         e

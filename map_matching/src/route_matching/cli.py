@@ -45,6 +45,10 @@ def _parser() -> argparse.ArgumentParser:
     build = commands.add_parser("build-catalog")
     build.add_argument("--data-dir")
     build.add_argument("--history-split", choices=("train", "test"), default="train")
+    build.add_argument(
+        "--mode", choices=("offline_history", "static_plan_graph"), default="offline_history"
+    )
+    build.add_argument("--plan-split", choices=("train", "test", "validate"), default="train")
     build.add_argument("--output", type=Path, required=True)
     _add_graph_options(build)
 
@@ -69,13 +73,25 @@ def main(argv: list[str] | None = None) -> None:
         split = args.history_split
         road_graph = _graph(args)
         road_graph.health()
+        schedule = (
+            data
+            / args.plan_split
+            / ("schedule_plan.csv" if args.plan_split == "validate" else "schedule.csv")
+            if args.mode == "static_plan_graph"
+            else data / split / "schedule.csv"
+        )
         catalog = build_catalog(
-            read_schedule(data / split / "schedule.csv", args.timezone),
-            read_events(data / split / "traffic.csv", args.timezone),
+            read_schedule(schedule, args.timezone),
+            []
+            if args.mode == "static_plan_graph"
+            else read_events(data / split / "traffic.csv", args.timezone),
             cutoff=None,
             graph=road_graph,
             config=Config(),
-            provenance={"history_split": split},
+            provenance={"plan_split": args.plan_split}
+            if args.mode == "static_plan_graph"
+            else {"history_split": split},
+            mode=args.mode,
         )
         catalog.save(args.output)
         result = {"catalog": str(args.output), "version": catalog.version, **catalog.report}
