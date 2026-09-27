@@ -13,7 +13,7 @@
   const App = {
     src: null, net: null, meta: null,
     now: 0, playing: true, speed: 60,
-    view: 'dispatch', sel: null, tab: 'attention', filter: null,
+    view: 'dispatch', sel: null, tab: 'attention', filter: null, showSelectedStops: true,
     linkDownSince: null, restoredAt: null,
     snap: null, lastTs: 0, lastUi: 0, lastCharts: 0, lastPage: 0, dirty: true, dragging: false,
     colors: {}, html: {},
@@ -372,7 +372,7 @@
     };
     document.querySelectorAll('#tabs button').forEach((b) => (b.onclick = () => setTab(b.dataset.tab)));
     $('opt-other').onchange = () => { App.dirty = true; };
-    $('opt-stops').onchange = () => { App.stopsSig = null; App.dirty = true; };
+    $('opt-stops').onchange = () => { App.showSelectedStops = true; App.stopsSig = null; App.dirty = true; };
 
     document.addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
@@ -393,7 +393,11 @@
       if (trk) {
         const tr = +trk.dataset.track;
         const measure = window.Measures.list().find((m) => String(m.id) === trk.dataset.measureId);
-        if (measure) select(tr, { measure }); else select(tr);
+        if (measure) select(tr, { measure });
+        else if (trk.classList.contains('dwell')) {
+          $('opt-stops').checked = false;
+          select(tr, { showStops: false });
+        } else select(tr);
         setTab('attention');
         return;
       }
@@ -439,7 +443,8 @@
   }
 
   function select(tr, options = {}) {
-    App.sel = options.measure ? tr : App.sel === tr ? null : tr;
+    App.sel = options.measure || options.showStops === false ? tr : App.sel === tr ? null : tr;
+    App.showSelectedStops = options.showStops !== false;
     App.selChanged = true;
     App.dirty = true;
     if (App.sel != null) {
@@ -653,15 +658,27 @@
 
     const allStops = $('opt-stops').checked;
     const route = App.sel != null ? App.net.routeByTr.get(App.sel) : null;
-    const states = !allStops && route ? stopStates(App.sel, s) : new Map();
-    const stSig = `${App.sel}:${allStops}:${[...states].map(([k, x]) => `${k}${x.state}${x.label || ''}`).join()}`;
+    const showStops = App.showSelectedStops;
+    let pattern = activePatterns.get(App.sel);
+    if (!pattern && route) {
+      const patterns = new Set(route.segments.map((segment) => segment.route_pattern_id));
+      if (patterns.size === 1) pattern = patterns.values().next().value;
+    }
+    const states = showStops && !allStops && pattern ? stopStates(App.sel, s) : new Map();
+    const stSig = `${App.sel}:${allStops}:${showStops}:${pattern || ''}:${[...states].map(([k, x]) => `${k}${x.state}${x.label || ''}`).join()}`;
     if (stSig !== App.stopsSig) {
       App.stopsSig = stSig;
-      const keys = allStops ? [...App.net.stops.keys()] : route ? route.stops : [];
-      dm.setStops(keys.map((k) => {
-        const st = App.net.stops.get(k);
-        return st && { ...st, ...(states.get(k) || {}) };
-      }).filter(Boolean), allStops);
+      let keys = [];
+      if (showStops && allStops) keys = [...App.net.stops.keys()];
+      else if (showStops && route && pattern) {
+        const onRoute = new Set(route.segments.filter((segment) => segment.route_pattern_id === pattern)
+          .flatMap((segment) => [segment.from, segment.to]));
+        keys = route.stops.filter((key) => onRoute.has(key));
+      }
+      dm.setStops(keys.map((key) => {
+        const stop = App.net.stops.get(key);
+        return stop && { ...stop, ...(states.get(key) || {}) };
+      }).filter(Boolean), showStops && allStops);
     }
 
     const showOther = $('opt-other').checked;
