@@ -1,10 +1,14 @@
-# Дашборд: статика на nginx. Подложку карты качаем при сборке, дальше всё работает без интернета.
+# Дашборд: локальная подложка используется без скачивания; при её отсутствии скачиваем один раз.
 FROM python:3.11-alpine AS builder
 
 WORKDIR /app
 COPY tools/fetch_basemap.py tools/fetch_basemap.py
-# curl и tar нужны скрипту скачивания подложки
-RUN apk add --no-cache curl tar gzip && python tools/fetch_basemap.py --out /app/moscow.pmtiles
+COPY data /app/data
+# Не скачиваем ни карту, ни инструменты, если PMTiles уже есть в build context.
+RUN if [ ! -s /app/data/basemap/moscow.pmtiles ]; then \
+      apk add --no-cache curl tar gzip && \
+      python tools/fetch_basemap.py --out /app/data/basemap/moscow.pmtiles; \
+    fi
 
 FROM nginx:1.27-alpine
 
@@ -17,8 +21,7 @@ COPY index.html config.js /usr/share/nginx/html/
 COPY css /usr/share/nginx/html/css
 COPY js /usr/share/nginx/html/js
 COPY vendor /usr/share/nginx/html/vendor
-COPY data /usr/share/nginx/html/data
-COPY --from=builder /app/moscow.pmtiles /usr/share/nginx/html/data/basemap/moscow.pmtiles
+COPY --from=builder /app/data /usr/share/nginx/html/data
 
 EXPOSE 80
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1
