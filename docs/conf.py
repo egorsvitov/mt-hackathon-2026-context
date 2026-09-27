@@ -6,7 +6,9 @@ basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend
 sys.path.insert(0, basedir)
 sys.path.insert(0, os.path.join(basedir, 'app'))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'ml_service')))
-sys.path.insert(0, os.path.abspath('../ml_service'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'ml_service', 'app')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'ndtp-parser')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'map_matching', 'src')))
 
 project = 'Московский Транспорт: Хакатон 2026'
 copyright = '2026, Team'
