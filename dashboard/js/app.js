@@ -371,7 +371,6 @@
       App.dirty = true;
     };
     document.querySelectorAll('#tabs button').forEach((b) => (b.onclick = () => setTab(b.dataset.tab)));
-    $('opt-other').onchange = () => { App.dirty = true; };
     $('opt-stops').onchange = () => { App.showSelectedStops = true; App.stopsSig = null; App.dirty = true; };
 
     document.addEventListener('keydown', (e) => {
@@ -526,9 +525,6 @@
     const sev = p ? p.severity : 'unknown';
     const col = App.colors[sev];
     const stale = isStale(p, v);
-    if (!v.route_id) {
-      return `<svg width="12" height="12" viewBox="-6 -6 12 12"><circle r="3.5" style="fill:${App.colors.unknown};stroke:${App.colors.page}" stroke-width="1.5" opacity=".8"/></svg>`;
-    }
     const reserve = v.reserve_of != null;
     const tag = reserve ? `<div class="tag reserve"><i>резерв</i>${p ? U.delay(p.prediction_delay_s) : 'на линии'}</div>`
       : p && (ALERT[p.severity] || sel)
@@ -681,14 +677,13 @@
       }).filter(Boolean), showStops && allStops);
     }
 
-    const showOther = $('opt-other').checked;
     const list = [];
     const reserves = window.Measures.list().filter((m) => m.kind === 'reserve');
     for (const v of s.vehicles) {
       if (v.reserve_of != null || reserves.some((m) => String(m.virtual_tr_id) === String(v.tr_id))) continue;
       // Резерв отображается ожидающим маркером ниже, только до времени отправления.
-      if (!v.route_id && !showOther) continue;
-      if (v.route_id && !v.in_service && v.status === 'offline') continue;
+      if (!v.route_id || !App.net.routeByTr.has(v.tr_id)) continue;
+      if (!v.in_service) continue;
       const p = s.predictions.get(v.tr_id);
       const sel = App.sel === v.tr_id;
       const rank = p ? U.SEV[p.severity].rank : -1;
