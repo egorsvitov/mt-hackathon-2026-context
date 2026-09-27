@@ -12,3 +12,4 @@ __pycache__/
 
 .env
 scratch/
+docs/_build/
