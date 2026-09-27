@@ -46,6 +46,27 @@
       }
     }
 
+    /** POST/DELETE к backend (меры диспетчера); ошибка — с текстом detail из ответа. */
+    async send(method, path, body) {
+      const r = await fetch(this.base + path, {
+        method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : `HTTP ${r.status}`);
+      return data;
+    }
+
+    /** Резервные автобусы появляются в /vehicles раньше, чем их маршрут у дашборда. */
+    async loadReserveRoutes() {
+      if (this.reserveFetch) return;
+      this.reserveFetch = true;
+      try {
+        const net = await this.get('/network');
+        for (const r of net.routes) if (r.reserve_of != null) this.network.addReserve(r);
+      } catch (e) { /* повторим на следующем опросе */ }
+      this.reserveFetch = false;
+    }
+
     async init() {
       // Сеть нужна для карты — без неё стартовать нельзя, повторяем до успеха.
       for (let attempt = 0; ; attempt++) {
@@ -81,6 +102,7 @@
           ['/vehicles', '/predictions', '/incidents', '/metrics'].map((p) => this.get(p)));
         const metrics = normTimes(met || {});
         const now = metrics.now || Date.now() / 1000;
+        if (this.last && now < this.last.now - 60) this.resetHistory();
         const predictions = new Map();
         for (const p of preds) {
           normTimes(p);
@@ -109,8 +131,11 @@
           if (!i.prediction_status) i.prediction_status = (predictions.get(i.tr_id) || {}).status;
           return i;
         });
+        let measures = this.last ? this.last.measures : [];
+        try { measures = await this.get('/whatif'); } catch (e) { /* backend без мер — остаются прежние */ }
+        if (vehicles.some((v) => v.reserve_of != null && !this.network.routeByTr.has(v.tr_id))) this.loadReserveRoutes();
         this.remember(now, predictions, incidents, metrics);
-        this.last = { now, dataNow: now, down: false, vehicles, predictions, incidents, metrics };
+        this.last = { now, dataNow: now, down: false, vehicles, predictions, incidents, metrics, measures };
         this.lastOk = Date.now() / 1000;
         this.error = null;
       } catch (e) {
@@ -118,10 +143,36 @@
       }
     }
 
+    /** Воспроизведение в backend началось заново (перемотка, новый круг дня): история страницы
+        относится к прежней линии времени — сбрасываем её, иначе аналитика перестаёт копиться. */
+    resetHistory() {
+      this.predLog.clear();
+      this.incLog.clear();
+      this.speedBuf.clear();
+      this.fcBuf.clear();
+      for (const k of Object.keys(this.hist)) this.hist[k] = [];
+      this.verified = [];
+      this.verifiedN = null;
+      this.restarts = (this.restarts || 0) + 1;
+    }
+
     async pollVerified() {
+      // Сверенных прогнозов за день — десятки тысяч: забираем только новые (по счётчику
+      // n_verified из /metrics) с небольшим запасом, а не весь список каждые 10 с.
+      const n = this.last && this.last.metrics ? this.last.metrics.n_verified : null;
+      if (n == null) return;
+      const fresh = this.verifiedN == null || n < this.verifiedN ? 20000 : n - this.verifiedN;
+      if (fresh <= 0) return;
       try {
-        const all = (await this.get('/predictions/verified?all=true&limit=20000')).map(normTimes);
-        this.verified = all.slice(0, 80);
+        const all = (await this.get(`/predictions/verified?all=true&limit=${Math.min(20000, fresh + 50)}`)).map(normTimes);
+        this.verifiedN = n;
+        const seen = new Set();
+        this.verified = [...all, ...this.verified].filter((v) => {
+          const key = v.sample_id || `${v.tr_id}_${v.as_of}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }).slice(0, 80);
         for (const v of all) {
           const key = v.sample_id || `${v.tr_id}_${v.as_of}`;
           const r = this.predLog.get(key) || this.toRec(v, key);

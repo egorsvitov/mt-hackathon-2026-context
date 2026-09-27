@@ -1,6 +1,6 @@
-"""Ответы API для диспетчерского дашборда (контракт: dashboard/CONTRACT.md).
+"""Схемы ответов API для дашборда, подробнее в dashboard/CONTRACT.md.
 
-Времена — ISO 8601 со смещением (+03:00), задержки — секунды со знаком.
+Время в формате ISO 8601 с зоной +03:00, задержки в секундах со знаком.
 """
 
 from datetime import datetime
@@ -13,6 +13,7 @@ Severity = Literal["ok", "warning", "critical", "early", "unknown"]
 
 
 class Stop(BaseModel):
+    """Остановка."""
     stop_key: int = Field(
         ..., description="Физическая остановка (уникальная точка geom)"
     )
@@ -22,11 +23,12 @@ class Stop(BaseModel):
 
 
 class RouteSegment(BaseModel):
+    """Участок маршрута между двумя остановками."""
     model_config = ConfigDict(populate_by_name=True)
 
     from_: int = Field(..., alias="from", description="stop_key начала участка")
     to: int
-    synthetic: bool = Field(..., description="true — нет GPS-геометрии, прямой отрезок")
+    synthetic: bool = Field(..., description="true, если GPS-геометрии нет и участок нарисован прямой")
     path: list[list[float]] = Field(..., description="[[lat, lon], ...]")
     segment_id: str | None = None
     route_pattern_id: str | None = None
@@ -37,21 +39,25 @@ class RouteSegment(BaseModel):
 
 
 class Route(BaseModel):
+    """Маршрут одного ТС: остановки и участки."""
     route_id: str
     tr_id: TrId
     name: str
     speed_norm_kmh: float | None = None
     stops: list[int]
     segments: list[RouteSegment]
+    reserve_of: TrId | None = Field(None, description="Резервный автобус линии этого ТС (мера диспетчера)")
 
 
 class Network(BaseModel):
+    """Все остановки и маршруты."""
     stops: list[Stop]
     routes: list[Route]
 
 
 class Visit(BaseModel):
-    visit_id: int = Field(..., description="tt_action_item_id — плановое посещение")
+    """Плановое посещение остановки и фактическое время, если детектор его засёк."""
+    visit_id: int = Field(..., description="Плановое посещение, tt_action_item_id из датасета")
     stop_key: int
     time_plan: datetime
     time_fact: datetime | None = Field(
@@ -60,11 +66,13 @@ class Visit(BaseModel):
 
 
 class Schedule(BaseModel):
+    """Плановые посещения одного ТС."""
     tr_id: TrId
     visits: list[Visit]
 
 
 class Vehicle(BaseModel):
+    """Последнее положение ТС."""
     tr_id: TrId
     unit_id: int | None = None
     route_id: str | None = None
@@ -80,15 +88,18 @@ class Vehicle(BaseModel):
     route_pattern_id: str | None = None
     position_quality: str | None = None
     off_route: bool | None = None
+    reserve_of: TrId | None = Field(None, description="Резервный автобус, выпущенный на линию этого ТС")
 
 
 class Reason(BaseModel):
+    """Вероятная причина отклонения."""
     code: str
     title: str
     detail: str | None = None
 
 
 class Evidence(BaseModel):
+    """Признак, на который опирается причина, и его обычное значение."""
     code: str
     label: str
     value: float | None = None
@@ -98,6 +109,7 @@ class Evidence(BaseModel):
 
 
 class SegmentRef(BaseModel):
+    """Участок от последней пройденной остановки до целевой."""
     from_stop_id: int
     from_stop_name: str
     to_stop_id: int
@@ -105,6 +117,7 @@ class SegmentRef(BaseModel):
 
 
 class Prediction(BaseModel):
+    """Прогноз отклонения ТС на остановке через 10-15 минут."""
     sample_id: str = Field(..., description="{tr_id}_{T}, как в points.csv")
     tr_id: TrId
     route_id: str | None = None
@@ -127,9 +140,12 @@ class Prediction(BaseModel):
     reason: Reason | None = None
     evidence: list[Evidence] = []
     recommendation: str | None = None
+    speed_required_kmh: float | None = None
+    trip_priority: Literal["first", "mid", "last"] | None = None
 
 
 class Incident(BaseModel):
+    """Инцидент: эпизод риска по ТС."""
     incident_id: str
     tr_id: TrId
     route_id: str | None = None
@@ -156,9 +172,12 @@ class Incident(BaseModel):
     alert_target_stop_name: str | None = None
     alert_target_time_begin: datetime | None = None
     outcome_delay_s: float | None = None
+    speed_required_kmh: float | None = None
+    trip_priority: Literal["first", "mid", "last"] | None = None
 
 
 class Verified(BaseModel):
+    """Прогноз, сверенный с фактическим прибытием."""
     sample_id: str | None = None
     as_of: datetime
     tr_id: TrId
@@ -175,13 +194,14 @@ class Verified(BaseModel):
 
 
 class Metrics(BaseModel):
+    """Состояние системы: поток, задержка обработки, точность."""
     now: datetime
     mode: Literal["replay", "live"]
     source: str
     ingest_status: Literal["ok", "degraded", "down"]
     model_version: str
     ml_status: str = Field(
-        ..., description="ok — прогнозы от ML-сервиса; fallback — ML недоступен"
+        ..., description="ok, если прогнозы идут от ML-сервиса, fallback, если он недоступен"
     )
     vehicles_live: int
     packets_per_min: int
@@ -190,6 +210,9 @@ class Metrics(BaseModel):
     inference_latency_ms_p95: float | None = None
     queue_lag_s: float = 0.0
     reconnects: int = 0
+    rejected_future: int = Field(
+        0, description="Отброшено отметок новее часов системы больше чем на MAX_FUTURE_SKEW_SEC"
+    )
     mae_live_s: float | None = None
     mae_baseline_live_s: float | None = None
     n_verified: int = 0
@@ -204,6 +227,7 @@ class Metrics(BaseModel):
 
 
 class Config(BaseModel):
+    """Пороги, горизонт и параметры модели для дашборда."""
     thresholds: dict[str, float]
     horizon_s: list[int]
     predict_every_s: int

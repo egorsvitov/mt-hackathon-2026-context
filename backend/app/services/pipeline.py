@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from route_matching import Catalog, MatchState, StreamingSpatialAdapter
+from runtime.stream import FeatureBuilder
 
 from app.api.websocket.dashboard_ws import manager
 from app.core.config import settings
@@ -99,10 +100,15 @@ class Pipeline:
         self.spatial: StreamingSpatialAdapter | None = None
         self.spatial_states: dict[str, MatchState] = {}
         self.spatial_error: str | None = None
+        self.model_features = FeatureBuilder(settings.ML_MODEL_DIR)
+        self.whatif = None  # меры диспетчера (services/whatif.py), подключаются при старте
         self.reset()
 
     def reset(self) -> None:
+        if self.whatif is not None:
+            self.whatif.clear()
         self.features.reset()
+        self.model_features.reset()
         self.incidents.reset()
         if self.spatial is not None:
             self.spatial.reset()
@@ -114,6 +120,9 @@ class Pipeline:
         self.last_packet_wall: float | None = None
         self.last_event_t: float | None = None
         self.reconnects = 0
+        self.rejected_future = 0
+        self._future_warned: set[str] = set()
+        self.live_seen = False  # после остановки воспроизведения пришёл живой поток
         if self.evaluator:
             self.evaluator = Evaluator(self.evaluator.facts)
 
@@ -140,6 +149,7 @@ class Pipeline:
         if self.spatial is not None:
             self.spatial.close()
             self.spatial = None
+        self.model_features.close()
 
     def load_facts(self, split: str) -> None:
         """Факты прибытий — только для сверки в replay, в признаки не попадают."""
@@ -164,7 +174,14 @@ class Pipeline:
         return "replay" if self.replay and self.replay.active else "live"
 
     def now(self) -> float:
-        return self.replay.clock() if self.mode == "replay" else time.time()
+        if self.mode == "replay":
+            return self.replay.clock()
+        # Воспроизведение остановлено, а живого потока ещё не было: часы замирают на последнем
+        # моменте воспроизведения — дашборд показывает последнее состояние как устаревшее,
+        # а не удаляет прогнозы и инциденты как «старые» относительно текущей даты.
+        if not self.live_seen and self.replay is not None and self.replay.t is not None:
+            return self.replay.clock()
+        return time.time()
 
     def ingest_status(self) -> str:
         if self.mode == "replay":
@@ -180,6 +197,21 @@ class Pipeline:
 
     async def ingest(self, rec: RawNDTPRecord) -> None:
         t = float(rec.timestamp)
+        now = self.now()
+        if not self.live_seen and rec.source != "replay" and self.mode == "live":
+            # Живой поток после остановленного воспроизведения: часы снова реальные, а состояние
+            # воспроизведения (прогнозы, инциденты, треки) — из другой линии времени, сбрасываем.
+            if self.replay is not None and self.replay.t is not None:
+                self.reset()
+            self.live_seen = True
+        if t > now + settings.MAX_FUTURE_SKEW_SEC:
+            # Часы трекера убежали вперёд или поток другой даты идёт поверх воспроизведения:
+            # такая отметка «заморозила» бы ТС — следующие точки считались бы опоздавшими.
+            self.rejected_future += 1
+            if rec.tr_id not in self._future_warned:
+                self._future_warned.add(rec.tr_id)
+                log.warning("tr_id=%s: отметка на %.0f с новее часов системы отброшена", rec.tr_id, t - now)
+            return
         self.last_packet_wall = time.time()
         self.last_event_t = (
             t if self.last_event_t is None else max(self.last_event_t, t)
@@ -198,6 +230,11 @@ class Pipeline:
                 self.spatial_error = f"{type(exc).__name__}: {exc}"
                 log.warning("Map matching update failed for tr_id=%s: %s", tr, exc)
         plan = self.network.plans.get(tr)
+        try:
+            watermark = math.floor(t / settings.PREDICT_EVERY_SEC) * settings.PREDICT_EVERY_SEC
+            self.model_features.ingest(rec, visible_until=watermark)
+        except (ValueError, KeyError, RuntimeError) as exc:
+            log.warning('ML history update failed for %s: %s', tr, exc)
         if arrival and self.evaluator and plan is not None:
             self.evaluator.on_arrival(int(plan.visit_id[arrival.idx]), arrival)
         if plan is None:
@@ -216,7 +253,18 @@ class Pipeline:
             self.incidents.drop(tr, T)
             return
         f, ctx = res
-        ml = await ml_client.predict(f)
+        plan = self.network.plans[tr]
+        try:
+            if int(tr) not in self.model_features.plans:
+                self.model_features.register_plan(tr, plan.visit_id, plan.plan,
+                    plan.ml_lon if plan.ml_lon is not None else plan.lon,
+                    plan.ml_lat if plan.ml_lat is not None else plan.lat)
+            model_input = self.model_features.request(tr, T, f.target_stop_id,
+                float(plan.plan[ctx['target_idx']]), f.current_delay_sec)
+            ml = await ml_client.predict(f, model_input)
+        except (ValueError, KeyError, RuntimeError) as exc:
+            log.warning('ML feature preparation failed: %s', exc)
+            ml = ml_client.fallback(f)
         pred = float(ml.prediction_delay_s)
         sev = severity_of(pred)
         rf = rule_features(f)
@@ -258,6 +306,8 @@ class Pipeline:
                 for e in evidence(rf, code)
             ],
             "recommendation": REASONS[code]["recommendation"] if code else None,
+            "speed_required_kmh": _r(rf["required_speed_kmh"], 1),
+            "trip_priority": self._trip_priority(tr, j),
         }
         self.predictions[tr] = p
         self.incidents.update(tr, p)
@@ -299,6 +349,24 @@ class Pipeline:
             "target_time_begin": to_dt(p["target_time_begin"]),
             "predicted_arrival": to_dt(p["predicted_arrival"]),
         }
+
+    @staticmethod
+    def _trip_priority(tr: str, target_idx: int) -> str:
+        """Критичность рейса: первый / последний / рядовой по расписанию дня."""
+        plan = pipeline.network.plans.get(tr)
+        if plan is None or not len(plan.plan):
+            return "mid"
+        n = len(plan.plan)
+        gaps = [(plan.plan[k] - plan.plan[k - 1]) >= 300 for k in range(1, n)]  # пауза 5+ мин = граница рейса
+        # индекс текущего рейса = число границ до target_idx
+        trip = sum(1 for k in range(1, target_idx + 1) if k - 1 < len(gaps) and gaps[k - 1])
+        # число рейсов всего
+        total = sum(1 for g in gaps if g) + 1
+        if trip == 0:
+            return "first"
+        if trip == total - 1:
+            return "last"
+        return "mid"
 
     def _pred_json(self, p: dict) -> dict:
         from app.schemas.dashboard import Prediction
@@ -344,6 +412,8 @@ class Pipeline:
                     "alert_target_stop_name": alert["target_stop_name"],
                     "alert_target_time_begin": to_dt(alert["target_time_begin"]),
                     "outcome_delay_s": ep.outcome_delay_s,
+                    "speed_required_kmh": cur.get("speed_required_kmh"),
+                    "trip_priority": cur.get("trip_priority", "mid"),
                 }
             )
         return out
@@ -395,6 +465,7 @@ class Pipeline:
                     "route_pattern_id": spatial.route_pattern_id if matched else None,
                     "position_quality": spatial.position_quality if matched else "raw",
                     "off_route": spatial.off_route if matched else None,
+                    "reserve_of": tr_out(self.whatif.reserve_of(tr)) if self.whatif and self.whatif.reserve_of(tr) else None,
                 }
             )
         return out
@@ -473,6 +544,7 @@ class Pipeline:
             else None,
             "queue_lag_s": round(lag, 1),
             "reconnects": self.reconnects,
+            "rejected_future": self.rejected_future,
             "mae_live_s": round(ev.sum_err / ev.n, 1) if ev and ev.n else None,
             "mae_baseline_live_s": round(ev.sum_base / ev.n, 1)
             if ev and ev.n

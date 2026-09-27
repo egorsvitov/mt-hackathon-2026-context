@@ -9,21 +9,19 @@ from app.schemas.telemetry import MLFeaturesPayload
 
 @dataclass
 class MLResult:
+    """Ответ модели: прогноз задержки, вероятность опоздания, версия и статус (model или fallback)."""
     prediction_delay_s: float
     late_probability: float | None
     model_version: str
-    status: str  # model | fallback
+    status: str
     latency_ms: float | None = None
 
 
 class MLServiceClient:
-    """Клиент ML-сервиса: POST признаков -> прогноз задержки.
+    """Клиент ML-сервиса: отправляет признаки и получает прогноз задержки.
 
-    Ответ ML-сервиса: ``{"prediction_delay_s": float, "late_probability": float?, "model_version": str}``.
-
-    Требование критерия 5: при недоступности ML сервис не падает, а выдаёт fallback
-    «прогноз = текущее отклонение» с явной пометкой ``status = fallback``. После ошибки ML
-    не опрашивается ``ML_RETRY_AFTER_SEC`` секунд, чтобы не тормозить поток телеметрии.
+    Если сервис не отвечает, возвращаем текущее отклонение как прогноз со статусом fallback
+    и не обращаемся к нему ML_RETRY_AFTER_SEC секунд.
     """
 
     FALLBACK_VERSION = "fallback:persistence"
@@ -38,6 +36,7 @@ class MLServiceClient:
 
     @property
     def status(self) -> str:
+        """ok, если модель отвечает, иначе fallback."""
         return (
             "fallback"
             if time.monotonic() < self.down_until or self.model_version is None
@@ -45,22 +44,24 @@ class MLServiceClient:
         )
 
     def fallback(self, features: MLFeaturesPayload) -> MLResult:
+        """Прогноз без модели: текущее отклонение остаётся таким же."""
         return MLResult(
             features.current_delay_sec, None, self.FALLBACK_VERSION, "fallback"
         )
 
-    async def predict(self, features: MLFeaturesPayload) -> MLResult:
+    async def predict(self, features: MLFeaturesPayload, model_input=None) -> MLResult:
+        """Запрашивает прогноз у ML-сервиса, при любой ошибке отдаёт fallback."""
         if time.monotonic() < self.down_until:
             return self.fallback(features)
         if self._client is None:
-            # connect — коротко: недоступный ML не должен задерживать поток телеметрии
+            # короткий connect, чтобы упавший ML не тормозил приём телеметрии
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.timeout, connect=0.5)
             )
         t0 = time.perf_counter()
         try:
             response = await self._client.post(
-                self.base_url, json=features.model_dump()
+                self.base_url, json=model_input.model_dump() if model_input is not None else features.model_dump()
             )
             response.raise_for_status()
             data = response.json()

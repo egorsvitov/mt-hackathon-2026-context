@@ -6,7 +6,10 @@
   <title>Диспетчерская · Предиктор задержек</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%233987e5'/%3E%3Cpath d='M4 11l3-6 2 4 1.5-2L12 11z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="vendor/maplibre/maplibre-gl.css">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=20260927-5">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script>
     // Тема до отрисовки, чтобы не мигало. По умолчанию — тёмная (диспетчерская).
     try { const t = localStorage.getItem('dash-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
@@ -15,7 +18,9 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <div class="logo">◆</div>
+      <a href="https://mt-hackathon.ru" target="_blank" rel="noopener" title="Сайт хакатона">
+        <img class="brand-logo" src="vendor/logo/mt-hackathon.svg" alt="Хакатон Московского транспорта">
+      </a>
       <div><b>Предиктор задержек</b><small>прогноз за 10–15 мин</small></div>
     </div>
     <nav class="views-nav" id="views-nav" aria-label="Экраны">
@@ -23,6 +28,14 @@
       <a href="#analytics" data-view="analytics">Аналитика</a>
       <a href="#journal" data-view="journal">Журнал</a>
     </nav>
+    <div class="org-logos">
+      <a href="https://mttech.moscow" target="_blank" rel="noopener" title="МТТЕХ — центр разработки Московского транспорта">
+        <img class="org-logo" src="vendor/logo/mttex.svg" alt="МТТЕХ">
+      </a>
+      <a href="https://ftim.ru" target="_blank" rel="noopener" title="Фонд «Транспортные инновации Москвы»">
+        <img class="org-logo" src="vendor/logo/transport-innovations.svg" alt="Транспортные инновации Москвы">
+      </a>
+    </div>
     <div class="clock"><span id="clock-time" class="num">--:--:--</span><small id="clock-date"></small></div>
     <div class="top-actions">
       <span class="status-pill" id="status-pill" title="Свежесть данных"><span class="dot"></span><span id="status-text">…</span></span>
@@ -46,6 +59,15 @@
             <button class="ghost wide" id="btn-link" title="Имитация обрыва связи с источником телеметрии">Обрыв связи</button>
           </div>
           <div class="demo-hint">Пробел — пауза, ← / → — ±5 мин</div>
+        </div>
+      </div>
+      <div class="bell-wrap">
+        <button class="ghost iconbtn bell-btn" id="btn-bell" aria-expanded="false" title="Уведомления диспетчера">
+          <svg class="bell-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2Zm6-6V11a6 6 0 0 0-5-5.91V4a1 1 0 0 0-2 0v1.09A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2Z"/></svg><span class="bell-badge" id="bell-badge" hidden>0</span>
+        </button>
+        <div class="bell-pop" id="bell-pop" hidden>
+          <div class="bell-head">Уведомления диспетчера</div>
+          <div class="bell-list" id="bell-list"></div>
         </div>
       </div>
       <button class="ghost" id="btn-theme" title="Светлая / тёмная тема">Тема</button>
@@ -161,12 +183,31 @@
   <script src="vendor/protomaps/pmtiles.js"></script>
   <script src="vendor/protomaps/basemaps.js"></script>
   <script src="vendor/echarts.min.js"></script>
-  <script src="js/util.js?v=20260927-1"></script>
-  <script src="js/source-replay.js?v=20260927-1"></script>
-  <script src="js/source-api.js?v=20260927-1"></script>
-  <script src="js/map.js?v=20260927-1"></script>
-  <script src="js/analytics.js?v=20260927-1"></script>
-  <script src="js/journal.js?v=20260927-1"></script>
-  <script src="js/app.js?v=20260927-1"></script>
+  <script src="js/measures.js?v=20260927-5"></script>
+  <script src="js/util.js?v=20260927-5"></script>
+  <script src="js/source-replay.js?v=20260927-5"></script>
+  <script src="js/source-api.js?v=20260927-5"></script>
+  <script src="js/map.js?v=20260927-5"></script>
+  <script src="js/analytics.js?v=20260927-5"></script>
+  <script src="js/journal.js?v=20260927-5"></script>
+  <script src="js/app.js?v=20260927-5"></script>
+  <!-- Меры диспетчера (what-if): параметры и уведомления -->
+  <dialog class="mdlg" id="measure-dlg" aria-labelledby="m-title">
+    <div class="mdlg-head"><h2 id="m-title">Мера</h2></div>
+    <div class="mdlg-body" id="m-body"></div>
+    <div class="mdlg-foot">
+      <button class="ghost" id="m-cancel">Отмена</button>
+      <button class="primary" id="m-apply">Применить</button>
+    </div>
+  </dialog>
+  <dialog class="mdlg" id="driver-dlg" aria-labelledby="d-title">
+    <div class="mdlg-head"><h2 id="d-title">Связь с водителем</h2></div>
+    <div class="mdlg-body" id="d-body"></div>
+    <div class="mdlg-foot">
+      <button class="ghost" id="d-cancel">Закрыть</button>
+      <button class="primary" id="d-send">Отправить сообщение</button>
+    </div>
+  </dialog>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
 </body>
 </html>

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import math
 from collections import OrderedDict, defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
@@ -40,6 +41,11 @@ class Frame:
     gps_time: float | None
     beam: tuple[Candidate, ...]
     state: MatchState
+
+
+def _history_order(e: Event):
+    """Sort key for the per-vehicle event history."""
+    return (e.event_time, e.available_time, e.packet_id)
 
 
 class Matcher:
@@ -392,8 +398,15 @@ class Matcher:
         if packet_key is not None:
             self._seen_packets.add(packet_key)
         history = self._history[event.tr_id]
-        history.append(event)
-        history.sort(key=lambda e: (e.event_time, e.available_time, e.packet_id))
+        order = _history_order
+        if history and order(event) < order(history[-1]):
+            bisect.insort(history, event, key=order)  # late packet
+        else:
+            history.append(event)
+        # a late packet only replays the last window, so older events can go (trimmed in batches)
+        cutoff = history[-1].event_time - self.config.window_s
+        if history[0].event_time < cutoff - self.config.window_s:
+            del history[: bisect.bisect_left(history, cutoff, key=lambda e: e.event_time)]
         if event.tr_id in self._last and event.event_time <= self._last[event.tr_id]:
             self.metrics["late_packets"] += 1
             latest = max(e.event_time for e in history)

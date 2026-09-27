@@ -13,7 +13,7 @@
   const App = {
     src: null, net: null, meta: null,
     now: 0, playing: true, speed: 60,
-    view: 'dispatch', sel: null, tab: 'attention', filter: null,
+    view: 'dispatch', sel: null, tab: 'attention', filter: null, showSelectedStops: true,
     linkDownSince: null, restoredAt: null,
     snap: null, lastTs: 0, lastUi: 0, lastCharts: 0, lastPage: 0, dirty: true, dragging: false,
     colors: {}, html: {},
@@ -91,6 +91,8 @@
     initControls();
     initCharts();
     for (const v of Object.values(window.Views)) if (v.init) v.init(App);
+    window.Measures.init(App);
+    initDriverDialog();
     logEvent('ok', App.src.kind === 'api'
       ? `Дашборд подключён к backend (${App.src.base})`
       : `Дашборд запущен в режиме воспроизведения${App.fallbackReason ? ' — backend недоступен' : ''}`);
@@ -138,10 +140,28 @@
   // ------------------------------------------------------------------ события системы (для «Журнала»)
 
   function logEvent(kind, text, t) {
-    App.events.unshift({ t: t != null ? t : App.now, wall: Date.now(), kind, text });
+    App.events.unshift({ t: t != null ? t : App.now, wall: Date.now(), kind, text, read: !$('bell-pop').hidden });
     if (App.events.length > 1000) App.events.pop();
+    if (App.renderBell) App.renderBell();
   }
   App.logEvent = logEvent;
+
+  const NOTIFY_KEYWORDS = ['Выпущен', 'Сокращены', 'Мера отменена', 'Сообщение отправлено', 'Диспетчер взял'];
+  const notifyIcon = (text) =>
+    text.includes('Сообщение') ? '💬' : text.includes('Выпущен') ? '🚌' : text.includes('Сокращены') ? '⏱' : text.includes('Мера отменена') ? '↩️' : '🔔';
+  function renderBell() {
+    const notifications = App.events.filter((e) => NOTIFY_KEYWORDS.some((k) => e.text.includes(k)));
+    const evs = notifications.slice(0, 50);
+    const badge = $('bell-badge'), list = $('bell-list');
+    const unread = notifications.filter((e) => !e.read).length;
+    badge.hidden = unread === 0;
+    badge.textContent = unread > 99 ? '99+' : String(unread);
+    list.innerHTML = evs.length
+      ? evs.map((e) => `<div class="bell-item"><span class="be-ic">${notifyIcon(e.text)}</span>` +
+        `<span class="be-body"><div class="be-text">${U.esc(e.text)}</div><div class="be-time">${U.time(e.t)}</div></div></span></div>`).join('')
+      : `<div class="bell-empty">Пока нет уведомлений</div>`;
+  }
+  App.renderBell = renderBell;
 
   /** Точка «связь и свежесть данных» не чаще раза в 5 с модельного времени; при перемотке назад лог сбрасывается. */
   function sampleLink(s) {
@@ -306,6 +326,16 @@
     $('btn-demo').onclick = (e) => { e.stopPropagation(); openDemo(pop.hidden); };
     document.addEventListener('click', (e) => { if (!pop.hidden && !e.target.closest('.demo-wrap')) openDemo(false); });
 
+    const bpop = $('bell-pop');
+    $('btn-bell').onclick = (e) => {
+      e.stopPropagation();
+      bpop.hidden = !bpop.hidden;
+      if (!bpop.hidden) App.events.forEach((entry) => { entry.read = true; });
+      renderBell();
+      $('btn-bell').setAttribute('aria-expanded', String(!bpop.hidden));
+    };
+    document.addEventListener('click', (e) => { if (!bpop.hidden && !e.target.closest('.bell-wrap')) bpop.hidden = true; });
+
     $('btn-play').onclick = togglePlay;
     document.querySelectorAll('#speed button').forEach((b) => (b.onclick = () => {
       setSpeed(+b.dataset.speed);
@@ -342,7 +372,7 @@
     };
     document.querySelectorAll('#tabs button').forEach((b) => (b.onclick = () => setTab(b.dataset.tab)));
     $('opt-other').onchange = () => { App.dirty = true; };
-    $('opt-stops').onchange = () => { App.stopsSig = null; App.dirty = true; };
+    $('opt-stops').onchange = () => { App.showSelectedStops = true; App.stopsSig = null; App.dirty = true; };
 
     document.addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
@@ -355,6 +385,24 @@
 
     // Делегирование кликов: карточки, кнопки «В работу» / «Подробнее», фильтры сводки.
     document.addEventListener('click', (e) => {
+      const ms = e.target.closest('[data-measure]');
+      if (ms) { window.Measures.open(ms.dataset.measure, +ms.dataset.tr); return; }
+      const mc = e.target.closest('[data-cancel-measure]');
+      if (mc) { window.Measures.cancel(+mc.dataset.cancelMeasure); return; }
+      const trk = e.target.closest('[data-track]');
+      if (trk) {
+        const tr = +trk.dataset.track;
+        const measure = window.Measures.list().find((m) => String(m.id) === trk.dataset.measureId);
+        if (measure) select(tr, { measure });
+        else if (trk.classList.contains('dwell')) {
+          $('opt-stops').checked = false;
+          select(tr, { showStops: false });
+        } else select(tr);
+        setTab('attention');
+        return;
+      }
+      const drv = e.target.closest('[data-driver]');
+      if (drv) { showDriverDialog(drv.dataset.tr, drv.dataset.inc); return; }
       const ack = e.target.closest('[data-ack]');
       if (ack) {
         const id = ack.dataset.ack;
@@ -394,8 +442,9 @@
     App.dirty = true;
   }
 
-  function select(tr) {
-    App.sel = App.sel === tr ? null : tr;
+  function select(tr, options = {}) {
+    App.sel = options.measure || options.showStops === false ? tr : App.sel === tr ? null : tr;
+    App.showSelectedStops = options.showStops !== false;
     App.selChanged = true;
     App.dirty = true;
     if (App.sel != null) {
@@ -404,11 +453,21 @@
       const p = s && s.predictions.get(App.sel);
       const visits = App.src.schedule(App.sel);
       let pts = [];
-      if (p && visits) {
-        const i = visits.pos.get(p.segment.from_stop_id), j = visits.pos.get(p.segment.to_stop_id);
-        pts = App.net.sectionPath(App.sel, visits, i, j, v && v.route_pattern_id);
+      if (options.measure && options.measure.kind === 'reserve') {
+        // В карточке меры показываем именно место резерва, а не весь прогнозный маршрут.
+        const start = options.measure.start;
+        if (start && start.lat != null && start.lon != null) pts = [[start.lat, start.lon]];
+      } else {
+        if (p && visits) {
+          const i = visits.pos.get(p.segment.from_stop_id), j = visits.pos.get(p.segment.to_stop_id);
+          pts = App.net.sectionPath(App.sel, visits, i, j, v && v.route_pattern_id);
+        }
+        if (v) pts.push([v.lat, v.lon]);
+        const reserve = !v ? (window.Measures.reserveOf(tr) || null) : null;
+        if (reserve && reserve.start && reserve.start.lat != null && reserve.start.lon != null) {
+          pts.push([reserve.start.lat, reserve.start.lon]);
+        }
       }
-      if (v) pts.push([v.lat, v.lon]);
       // Приближаем после открытия нижней панели, иначе участок уйдёт за её край.
       setTimeout(() => { App.dmap.resize(); App.dmap.focus(pts); }, 120);
     }
@@ -450,6 +509,10 @@
     const r = App.net.routeByTr.get(tr);
     let h = `<b>ТС ${tr}</b>${r ? ` · ${U.esc(r.name)}` : ' · <span class="muted">нет расписания</span>'}<br>` +
       `${U.num(v.speed)} км/ч · данные ${U.dur(v.data_age_s)} назад`;
+    // Точность позиции: съехал ли автобус с маршрута и насколько надёжно совпадение с планом.
+    if (v.off_route) h += `<br><span class="sev" style="color:var(--warn)">съехал с маршрута</span>`;
+    else if (v.position_quality === 'matched') h += `<br><span class="sev" style="color:var(--ok)">на маршруте</span>`;
+    else if (v.position_quality) h += `<br><span class="sev" style="color:var(--muted)">позиция ${v.position_quality}</span>`;
     if (p) h += `<br>${U.sevBadge(p.severity)} ${plainDelay(p.prediction_delay_s)} к «${U.esc(p.target_stop_name)}» в ${U.time(p.predicted_arrival)}`;
     return h;
   }
@@ -466,11 +529,14 @@
     if (!v.route_id) {
       return `<svg width="12" height="12" viewBox="-6 -6 12 12"><circle r="3.5" style="fill:${App.colors.unknown};stroke:${App.colors.page}" stroke-width="1.5" opacity=".8"/></svg>`;
     }
-    const tag = p && (ALERT[p.severity] || sel)
-      ? `<div class="tag"><i>${v.tr_id}</i>${U.delay(p.prediction_delay_s)}${stale ? ' · нет данных' : ''}</div>` : '';
+    const reserve = v.reserve_of != null;
+    const tag = reserve ? `<div class="tag reserve"><i>резерв</i>${p ? U.delay(p.prediction_delay_s) : 'на линии'}</div>`
+      : p && (ALERT[p.severity] || sel)
+        ? `<div class="tag"><i>${v.tr_id}</i>${U.delay(p.prediction_delay_s)}${stale ? ' · нет данных' : ''}</div>` : '';
     return `<svg width="26" height="26" viewBox="-13 -13 26 26">` +
       `<g transform="rotate(${v.heading || 0})"><path d="M0-12.5 4.5-6.5h-9z" style="fill:${stale ? App.colors.unknown : col}"/></g>` +
       `<circle r="7.5" class="ring" style="fill:${col};stroke:${sel ? App.colors.text : App.colors.page}" stroke-width="${sel ? 3 : 2}" ${stale ? 'stroke-dasharray="3 2" fill-opacity=".45"' : ''}/>` +
+      (reserve ? `<circle r="10.5" fill="none" style="stroke:${App.colors.ok}" stroke-width="1.5" stroke-dasharray="3 2"/>` : '') +
       `</svg>${tag}`;
   }
 
@@ -553,8 +619,8 @@
     // Проблемные участки: от последней пройденной остановки до целевой.
     // В режиме API расписание подгружается асинхронно, поэтому раз в ~16 с участки пересобираются.
     const alerts = [...s.predictions.values()].filter((p) => ALERT[p.severity] || p.tr_id === App.sel);
-    const ssig = alerts.map((p) => `${p.tr_id}:${p.segment.from_stop_id}:${p.segment.to_stop_id}:${p.severity}:${p.status}:${p.prediction_delay_s}:${activePatterns.get(p.tr_id) || ''}`).join('|') +
-      `|${App.sel}|${App.src.kind === 'api' ? Date.now() >> 14 : ''}`;
+    const ssig = alerts.map((p) => `${p.tr_id}:${p.segment.from_stop_id}:${p.segment.to_stop_id}:${p.severity}:${p.status}:${p.prediction_delay_s}:${p.cur_dev_s}:${activePatterns.get(p.tr_id) || ''}`).join('|') +
+      `|${App.sel}|${Math.floor(App.now / 30)}|${App.src.kind === 'api' ? Date.now() >> 14 : ''}`;
     if (ssig !== App.sectionSig) {
       App.sectionSig = ssig;
       const list = [];
@@ -563,12 +629,28 @@
         const visits = App.src.schedule(p.tr_id);
         if (!visits) continue;
         const i = visits.pos.get(p.segment.from_stop_id), j = visits.pos.get(p.segment.to_stop_id);
-        list.push({
+        if (i == null || j == null || i >= j) continue;
+        const parts = [];
+        const initial = expectedDelay(visits, p, i, j, App.now);
+        for (let k = i; k < j; k++) {
+          const start = expectedDelay(visits, p, k, j, App.now);
+          const end = expectedDelay(visits, p, k + 1, j, App.now);
+          if (start == null || end == null) continue;
+          // Зелёный начинается после возврата прогноза в норму; стабильные нормальные участки
+          // остаются базовой линией без цветной накладки.
+          const recover = (initial > 120 && end <= 120 && end < start) ||
+            (initial < -60 && end >= -60 && end > start);
+          const problem = end > 120 || end < -60 ||
+            (p.prediction_delay_s > 120 && end > start) ||
+            (p.prediction_delay_s < -60 && end < start);
+          if (!recover && !problem) continue;
+          for (const path of App.net.sectionPaths(p.tr_id, visits, k, k + 1, activePatterns.get(p.tr_id))) {
+            parts.push({ path, recover });
+          }
+        }
+        if (parts.length) list.push({
           tr: p.tr_id, sev: p.severity, stale: p.status === 'stale', dim: App.sel != null && App.sel !== p.tr_id,
-          paths: App.net.sectionPaths(p.tr_id, visits, i, j, activePatterns.get(p.tr_id)),
-          // Целевая остановка выбранного ТС выделяется в слое остановок; у остальных ТС маркер цели
-          // не рисуется: прогноз скользящий, и цели прыгали бы по карте.
-          target: null,
+          parts,
         });
       }
       dm.setSections(list);
@@ -576,20 +658,35 @@
 
     const allStops = $('opt-stops').checked;
     const route = App.sel != null ? App.net.routeByTr.get(App.sel) : null;
-    const states = !allStops && route ? stopStates(App.sel, s) : new Map();
-    const stSig = `${App.sel}:${allStops}:${[...states].map(([k, x]) => `${k}${x.state}${x.label || ''}`).join()}`;
+    const showStops = App.showSelectedStops;
+    let pattern = activePatterns.get(App.sel);
+    if (!pattern && route) {
+      const patterns = new Set(route.segments.map((segment) => segment.route_pattern_id));
+      if (patterns.size === 1) pattern = patterns.values().next().value;
+    }
+    const states = showStops && !allStops && pattern ? stopStates(App.sel, s) : new Map();
+    const stSig = `${App.sel}:${allStops}:${showStops}:${pattern || ''}:${[...states].map(([k, x]) => `${k}${x.state}${x.label || ''}`).join()}`;
     if (stSig !== App.stopsSig) {
       App.stopsSig = stSig;
-      const keys = allStops ? [...App.net.stops.keys()] : route ? route.stops : [];
-      dm.setStops(keys.map((k) => {
-        const st = App.net.stops.get(k);
-        return st && { ...st, ...(states.get(k) || {}) };
-      }).filter(Boolean), allStops);
+      let keys = [];
+      if (showStops && allStops) keys = [...App.net.stops.keys()];
+      else if (showStops && route && pattern) {
+        const onRoute = new Set(route.segments.filter((segment) => segment.route_pattern_id === pattern)
+          .flatMap((segment) => [segment.from, segment.to]));
+        keys = route.stops.filter((key) => onRoute.has(key));
+      }
+      dm.setStops(keys.map((key) => {
+        const stop = App.net.stops.get(key);
+        return stop && { ...stop, ...(states.get(key) || {}) };
+      }).filter(Boolean), showStops && allStops);
     }
 
     const showOther = $('opt-other').checked;
     const list = [];
+    const reserves = window.Measures.list().filter((m) => m.kind === 'reserve');
     for (const v of s.vehicles) {
+      if (v.reserve_of != null || reserves.some((m) => String(m.virtual_tr_id) === String(v.tr_id))) continue;
+      // Резерв отображается ожидающим маркером ниже, только до времени отправления.
       if (!v.route_id && !showOther) continue;
       if (v.route_id && !v.in_service && v.status === 'offline') continue;
       const p = s.predictions.get(v.tr_id);
@@ -599,6 +696,14 @@
         tr: v.tr_id, lat: v.lat, lon: v.lon, html: vehHtml(v, p, sel), sel, big: !!v.route_id, clickable: !!v.route_id,
         z: sel ? 20 : v.route_id ? rank + 12 : 1,
       });
+    }
+    for (const m of reserves) {
+      const exitT = m.start && m.start.time != null ? U.ts(m.start.time)
+        : m.start && m.start.departure_s != null ? m.start.departure_s : null;
+      if (!m.start || m.start.lat == null || m.start.lon == null ||
+          (exitT != null && exitT <= App.now)) continue;
+      list.push({ tr: m.virtual_tr_id, lat: m.start.lat, lon: m.start.lon, html: ghostHtml(m),
+        sel: App.sel === +m.virtual_tr_id, big: true, clickable: true, z: 14 });
     }
     dm.setVehicles(list);
 
@@ -693,7 +798,9 @@
       `<button class="sb-item${c[k] ? '' : ' zero'}${App.filter === k ? ' on' : ''}" data-filter="${k}">${U.sevIcon(k, 13)}<b>${c[k]}</b> ${U.SEV[k].label.toLowerCase()}</button>`).join('');
     const att = s.incidents.filter((i) => i.status === 'active' && i.severity !== 'ok');
     const inWork = att.filter((i) => App.ack.has(i.incident_id)).length;
-    const html = `<div class="sb-total"><b>${total}</b> из ${App.net.routes.length} маршрутов на линии</div>` +
+    const off = App.net.routes.length - total;
+    const offNote = off > 0 ? ` · <span class="muted">${off} без ТС</span>` : '';
+    const html = `<div class="sb-total"><b>${total}</b> из ${App.net.routes.length} маршрутов на линии${offNote}</div>` +
       `<div class="sb-bar">${bar}</div><div class="sb-items">${labels}</div>` +
       `<div class="sb-att">${att.length ? `Требуют внимания: <b>${att.length - inWork}</b>${inWork ? ` · в работе ${inWork}` : ''}` : 'Все ТС идут по графику'}</div>`;
     if (html !== App.html.status) { App.html.status = html; $('statusbar').innerHTML = html; }
@@ -704,6 +811,98 @@
   function routeName(tr) {
     const r = App.net.routeByTr.get(tr);
     return r ? r.name : 'маршрут не восстановлен';
+  }
+
+  function measureButtons(tr) {
+    const Ms = window.Measures;
+    if (Ms.reserveOf(tr)) return ''; // сам резервный автобус
+    // Кнопки всегда активны: в live применяют меру через backend, в replay — демо-режим (без сервера).
+    return `<button class="mb" data-measure="reserve" data-tr="${tr}" title="Резервный автобус возьмёт рейс с ближайшей остановки, к которой успевает">＋ Доп. автобус</button>` +
+      `<button class="mb" data-measure="dwell" data-tr="${tr}" title="Короче стоянки на остановках и отстой на конечной">Сократить стоянки</button>`;
+  }
+
+  function measureChips(tr) {
+    const same = (a, b) => String(a) === String(b);
+    const chips = window.Measures.forTr(tr).map((m) => {
+      let label;
+      if (m.kind === 'reserve' && same(m.virtual_tr_id, tr)) label = `резерв линии ТС ${m.tr_id}`;
+      else if (m.kind === 'reserve') label = `＋ резерв ${m.virtual_tr_id}${m.start ? ` · ${m.state === 'к точке выхода' ? 'выход' : 'с'} ${U.time(U.ts(m.start.time))}` : ''}`;
+      else {
+        const v = (m.vehicles || []).find((x) => same(x.tr_id, tr));
+        const t = v && v.target;
+        label = `⏱ стоянки −${m.cut_s} с${t ? `: ${U.delay(t.delay_s)} → ${U.delay(t.delay_measure_s)}` : ''}`;
+      }
+      return `<span class="m-chip ${m.kind}" title="${U.esc(m.text || '')}">${U.esc(label)}` +
+        `<button class="linkbtn" data-cancel-measure="${m.id}" title="${m.kind === 'reserve' ? 'Снять резерв с линии' : 'Отменить меру'}">✕</button></span>`;
+    });
+    return chips.length ? `<div class="m-chips">${chips.join('')}</div>` : '';
+  }
+
+  /** Текст о мерах для панели «Почему так считаем». */
+  function measureNotes(tr) {
+    const same = (a, b) => String(a) === String(b);
+    return window.Measures.forTr(tr).map((m) => {
+      if (m.kind === 'reserve' && same(m.virtual_tr_id, tr)) {
+        return `<div class="rec measure"><b>Резервный автобус</b> линии ТС ${m.tr_id}, ${U.esc(m.state || '')}. ${U.esc(m.text || '')}</div>`;
+      }
+      if (m.kind === 'reserve') {
+        return `<div class="rec measure"><b>Выпущен резерв ${m.virtual_tr_id}</b> (${U.esc(m.state || '')}). ${U.esc(m.text || '')}</div>`;
+      }
+      const v = (m.vehicles || []).find((x) => same(x.tr_id, tr));
+      const b = v && v.back_on_schedule;
+      return `<div class="rec measure"><b>Сокращены стоянки</b> (${m.scope === 'route' ? 'вся линия' : 'это ТС'}, −${m.cut_s} с` +
+        `${m.short_layover ? ', отстой 2 мин' : ''}). ` + (v && v.target
+        ? `К «${U.esc(v.target.stop_name)}» ${U.delay(v.target.delay_s)} → <b>${U.delay(v.target.delay_measure_s)}</b>` +
+          (b ? `, в графике с «${U.esc(b.stop_name)}» в ${U.time(U.ts(b.time_plan))}` : '') +
+          `; остановок с опозданием > 2 мин: ${v.late_stops} → <b>${v.late_stops_measure}</b>.`
+        : 'Эффект появится вместе с прогнозом.') + '</div>';
+    }).join('');
+  }
+
+  /** Резерв ещё едет к точке выхода — «призрак» на остановке выхода, пока нет его отметок. */
+  function ghostHtml(m) {
+    return `<svg width="26" height="26" viewBox="-13 -13 26 26"><circle r="7.5" class="ring" style="fill:${App.colors.ok};stroke:${App.colors.page}"` +
+      ` stroke-width="2" stroke-dasharray="3 2" fill-opacity=".35"/></svg>` +
+      `<div class="tag reserve"><i>резерв</i>выход ${U.time(U.ts(m.start.time))}</div>`;
+  }
+
+  function tripBadge(p) {
+    if (p === 'first') return `<span class="trip-badge first" title="Открывающий рейс — критичен по плану">открывающий</span>`;
+    if (p === 'last') return `<span class="trip-badge last" title="Закрывающий рейс — критичен по плану">закрывающий</span>`;
+    return '';
+  }
+
+  /** Диалог «Связаться с водителем»: отправка сообщения с прогнозом водителю через NDTP. */
+  function showDriverDialog(tr, incId) {
+    const s = App.snap || {};
+    // Берём данные прогноза; при отсутствии — данные инцидента (чтобы не было пустых «—»).
+    let p = s.predictions ? s.predictions.get(tr) : null;
+    let inc = null;
+    if (incId && s.incidents) inc = s.incidents.find((x) => String(x.incident_id) === String(incId));
+    if (!p && inc) p = inc;
+    const dlg = $('driver-dlg');
+    const body = $('d-body');
+    if (!dlg || !body) return;
+    const delay = p && p.prediction_delay_s != null ? U.delay(p.prediction_delay_s) : '—';
+    const target = p && p.target_stop_name ? p.target_stop_name : '—';
+    const at = p && p.predicted_arrival ? U.time(p.predicted_arrival) : '—';
+    body.innerHTML =
+      `<p class="m-ctx">ТС <b>${tr}</b> · ${p && p.severity ? U.sevBadge(p.severity) : ''}</p>` +
+      `<div class="d-msg"><b>Сообщение водителю:</b><br>по прогнозу к «${U.esc(target)}» вы придёте в ${at} (${delay}). Просьба подтвердить статус по бортовому терминалу.</div>`;
+    dlg.dataset.tr = tr;
+    dlg.showModal();
+  }
+
+  function initDriverDialog() {
+    const dlg = $('driver-dlg');
+    if (!dlg) return;
+    $('d-cancel').onclick = () => dlg.close();
+    $('d-send').onclick = () => {
+      const tr = dlg.dataset.tr;
+      logEvent('info', `Сообщение отправлено водителю ТС ${tr}`);
+      if (window.Measures && window.Measures.toast) window.Measures.toast(`<b>Сообщение отправлено водителю ТС ${tr}</b>`, 'ok', 2000);
+      dlg.close();
+    };
   }
 
   function attentionCard(i) {
@@ -725,20 +924,27 @@
       if (conf && !simple) meta.push(`уверенность ${conf}`);
       if (simple) meta.push('прогноз упрощённый: модель недоступна');
       if (stale) meta.push('данные устарели');
+      // Приоритет рейса (открывающий/закрывающий — финансовый риск) и нужная скорость для графика.
+      const sp = i.speed_required_kmh != null
+        ? `<div class="a-speed">Для восстановления графика нужна средняя скорость ≈ <b>${Math.round(i.speed_required_kmh)} км/ч</b></div>` : '';
       details = `<div class="a-details">` +
         `<div>Участок: <b>${U.esc(i.segment.from_stop_name)}</b> → <b>${U.esc(i.segment.to_stop_name)}</b></div>` +
         `<div>По плану <b>${U.time(i.target_time_begin)}</b> → ожидается <b>${U.time(i.predicted_arrival)}</b></div>` +
         (r && !calming && r.detail ? `<div class="a-detail">${U.esc(r.detail)}</div>` : '') +
         (i.recommendation && !calming ? `<div class="rec">${U.esc(i.recommendation)}</div>` : '') +
-        `<div class="a-meta">${meta.join(' · ')}</div></div>`;
+        (!calming && !simple && sp ? sp : '') +
+        `<div class="a-meta">${meta.join(' · ')}</div>` +
+        (!calming ? `<div class="a-measures"><span class="muted">Меры:</span>${measureButtons(i.tr_id)}</div>` : '') + '</div>';
     }
+    const applied = measureChips(i.tr_id);
     return `<div class="acard${sel}${stale ? ' stale' : ''}" style="--c:${color}" data-tr="${i.tr_id}">` +
       `<div class="a-top"><span class="a-ic">${U.sevIcon(sev, 16)}</span>` +
-      `<div class="a-main"><div class="a-title">ТС ${i.tr_id} <span class="a-route">${U.esc(routeName(i.tr_id))}</span></div>` +
+      `<div class="a-main"><div class="a-title">ТС ${i.tr_id} <span class="a-route">${U.esc(routeName(i.tr_id))}</span>${tripBadge(i.trip_priority)}</div>` +
       `<div class="a-when">${until > 0 ? `через <b>${U.dur(until)}</b>` : '<b>сейчас</b>'} · к «${U.esc(i.target_stop_name)}»</div>` +
-      `<div class="a-why">${U.esc(why)}${stale ? ' · <span class="muted">нет свежих данных</span>' : ''}</div></div>` +
+      `<div class="a-why">${U.esc(why)}${stale ? ' · <span class="muted">нет свежих данных</span>' : ''}</div>${applied}</div>` +
       `<div class="a-delay num">${U.delay(i.prediction_delay_s)}<small>${word}</small></div></div>` +
       `${details}<div class="a-actions">` +
+      `<button class="ghost sm" data-driver="1" data-inc="${i.incident_id}" data-tr="${i.tr_id}">Связаться с водителем</button>` +
       `<button class="ghost sm" data-ack="${i.incident_id}" data-tr="${i.tr_id}">В работу</button>` +
       `<button class="ghost sm" data-expand="${i.incident_id}">${open ? 'Свернуть ▴' : 'Подробнее ▾'}</button></div></div>`;
   }
@@ -760,7 +966,35 @@
     let html = todo.length ? todo.map(attentionCard).join('')
       : `<div class="empty">${U.sevIcon('ok', 22)}<br>Сейчас ничего не требует внимания.<br>Все ТС идут по графику.</div>`;
     if (work.length) html += `<div class="section-title">В работе · ${work.length}</div>` + work.map(workRow).join('');
+    html += renderMeasuresPanel();
     if (html !== App.html.att) { App.html.att = html; $('tab-attention').innerHTML = html; }
+  }
+
+  /** Панель применённых диспетчером мер: клик по записи приближает к ТС/резерву на карте. */
+  function renderMeasuresPanel() {
+    const ms = window.Measures.list();
+    if (!ms.length) return '';
+    const rows = ms.map((m) => {
+      const appliedAt = m.applied_at != null ? m.applied_at : U.ts(m.created_at);
+      const t = appliedAt != null ? U.time(appliedAt) : '';
+      const timeHtml = t ? `<span class="m-time">${t}</span>` : '';
+      if (m.kind === 'reserve') {
+        const name = m.start && m.start.stop_name ? U.esc(m.start.stop_name) : '';
+        const departure = m.start && m.start.departure_s != null ? m.start.departure_s : U.ts(m.start && m.start.time);
+        const dep = departure != null ? `отправление в ${U.time(departure)}` : '';
+        return `<div class="mrow reserve" data-track="${m.virtual_tr_id}" data-measure-id="${m.id}" title="Показать резерв на карте">` +
+          `<span class="m-ic">🚌</span><span class="m-main"><span class="m-t">Резерв ТС ${m.tr_id} · с «${name}»</span>` +
+          `<span class="m-sub">${dep}</span>${timeHtml}</span></div>`;
+      }
+      const who = m.scope === 'route' ? `линия ${m.tr_id}` : `ТС ${m.tr_id}`;
+      const v = (m.vehicles || [])[0];
+      const eff = v && v.target
+        ? `${U.delay(v.target.delay_s)} → ${U.delay(v.target.delay_measure_s)}` : '';
+      return `<div class="mrow dwell" data-track="${m.tr_id}" title="Показать ТС на карте">` +
+        `<span class="m-ic">⏱</span><span class="m-main"><span class="m-t">Сокращение стоянок · ${U.esc(who)} (−${m.cut_s} с)</span>` +
+        `<span class="m-sub">${U.esc(eff)}</span>${timeHtml}</span></div>`;
+    }).join('');
+    return `<div class="section-title">Применённые меры · ${ms.length} <span class="muted">(клик — показать на карте)</span></div>` + rows;
   }
 
   function renderRoutes(s) {
@@ -839,11 +1073,15 @@
     if (p && p.cur_dev_s != null) facts.push(`сейчас ${U.delay(p.cur_dev_s)}`);
     if (v) facts.push(`${U.num(v.speed)} км/ч`, `данные ${U.dur(v.data_age_s)} назад`);
     const head = `<div class="dh-1"><span class="t">ТС ${tr}</span>${U.sevBadge(sev)}<span class="kv">${U.esc(r ? r.name : '')}</span>` +
-      `<span class="kv muted">${facts.join(' · ')}</span>` +
+      `<span class="kv muted">${facts.join(' · ')}</span>${measureChips(tr)}` +
+      `<span class="dh-actions">${visits ? measureButtons(tr) : ''}</span>` +
       `<button class="iconbtn close" data-action="close" title="Закрыть (Esc)" aria-label="Закрыть">✕</button></div>` +
       `<div class="dh-2">${line2}</div>`;
     if (head !== App.html.dhead) { App.html.dhead = head; $('drawer-head').innerHTML = head; }
 
+    let proj = window.Measures.projection(tr);
+    if (proj && !proj.rows.length) proj = null;
+    if (proj) proj.byVisit = new Map(proj.rows.map((r) => [r.visit_id, r]));
     // Ближайшие остановки: пройденные — с фактом, впереди — план и ожидаемое время.
     let strip = '<div class="empty">Расписание загружается…</div>';
     if (visits) {
@@ -866,6 +1104,8 @@
           const d = expectedDelay(visits, p, k, ti, now);
           if (ti >= 0 && k > ti) cls = 'after';
           tm = d == null ? U.time(visits.plan[k]) : `${U.time(visits.plan[k])} → <b>${k === ti ? '' : '≈'}${U.time(visits.plan[k] + d)}</b>`;
+          const mr = proj && visits.id ? proj.byVisit.get(visits.id[k]) : null;
+          if (mr && mr.delay_measure_s < mr.delay_s - 5) tm += ` <span class="mt" title="с мерой">≈${U.time(visits.plan[k] + mr.delay_measure_s)}</span>`;
         }
         if (k === ti) cls += ' target';
         rowsHtml.push(`<div class="stop ${cls}" style="--c:${U.SEV[sev].color}"><span class="pin"></span><span class="nm" title="${name}">${name}${k === ti ? ' · прогноз' : ''}</span><span class="tm">${tm}</span></div>`);
@@ -889,6 +1129,7 @@
           return `<div class="row${e.flag ? ' flag' : ''}"><span class="l">${U.esc(e.label)}</span><span class="v">${val}${norm}</span></div>`;
         }).join('');
     }
+    ev = measureNotes(tr) + ev;
     if (ev !== App.html.ev) { App.html.ev = ev; $('evidence').innerHTML = ev; }
 
     // График обновляем не чаще раза в секунду.
@@ -909,7 +1150,7 @@
         formatter: (ps) => (ps.length ? `<b>${U.time(ps[0].value[0] / 1000)}</b><br>` +
           ps.map((q) => `${q.marker}${q.seriesName}: <b>${U.delay(q.value[1] * 60)}</b>`).join('<br>') : ''),
       },
-      xAxis: axisTime(C, now - 5400, now + 1200),
+      xAxis: axisTime(C, now - 5400, proj ? Math.max(now + 1200, Math.min(now + 3600, proj.rows[proj.rows.length - 1].t)) : now + 1200),
       yAxis: {
         type: 'value', axisLabel: { color: C.muted, fontSize: 10.5, formatter: (x) => (x > 0 ? '+' : '') + x },
         splitLine: { lineStyle: { color: C.grid } }, min: (e) => Math.min(-2, Math.floor(e.min)), max: (e) => Math.max(3, Math.ceil(e.max)),
@@ -935,6 +1176,14 @@
           lineStyle: { width: 2, color: C.s2 }, itemStyle: { color: C.s2 },
         },
         {
+          name: 'Без меры', type: 'line', data: proj ? proj.rows.filter((r) => r.t <= now + 3600).map((r) => [r.t * 1000, r.delay_s / 60]) : [],
+          symbol: 'none', lineStyle: { width: 1.5, color: C.s2, type: 'dashed' }, itemStyle: { color: C.s2 },
+        },
+        {
+          name: 'С мерой', type: 'line', data: proj ? proj.rows.filter((r) => r.t <= now + 3600).map((r) => [r.t * 1000, r.delay_measure_s / 60]) : [],
+          symbol: 'none', lineStyle: { width: 2.5, color: C.ok }, itemStyle: { color: C.ok },
+        },
+        {
           name: 'Текущий прогноз', type: 'scatter', data: cur, symbolSize: 12, z: 5,
           itemStyle: { color: C.s2, borderColor: C.surface, borderWidth: 2 },
           label: { show: true, position: 'left', distance: 8, color: C.text, fontWeight: 600, fontSize: 11, formatter: () => (p ? U.delay(p.prediction_delay_s) : '') },
@@ -948,6 +1197,14 @@
   function update(force) {
     const s = App.src.snapshot(App.now, App.linkDownSince);
     App.snap = s;
+    if (App.src.restarts && App.src.restarts !== App.seenRestarts) {
+      // Backend начал воспроизведение заново: связь там восстановлена, история страницы сброшена.
+      App.seenRestarts = App.src.restarts;
+      App.apiLinkDown = false;
+      App.restoredAt = null;
+      syncLink();
+      App.lastPage = 0;
+    }
     if (force) App.selChanged = true;
     trackEvents(s);
     sampleLink(s);

@@ -1,3 +1,5 @@
+"""Точка входа FastAPI: приложение, CORS и маршруты API."""
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -9,6 +11,7 @@ from app.api.websocket.dashboard_ws import ws_router
 from app.core.config import settings
 from app.services.pipeline import pipeline
 from app.services.replay import ReplayFeeder
+from app.services.whatif import WhatIf
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -18,10 +21,12 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Справочные данные: сеть маршрутов и плановое расписание.
+    """Загружает справочники и запускает воспроизведение дня, при выключении всё останавливает."""
     pipeline.network.load()
     pipeline.load_spatial()
     pipeline.replay = ReplayFeeder(pipeline)
+    pipeline.whatif = WhatIf(pipeline)
+    pipeline.whatif.start()
     if settings.REPLAY_AUTOSTART and pipeline.network.loaded:
         try:
             pipeline.load_facts(settings.REPLAY_SPLIT)
@@ -29,6 +34,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             log.exception("Replay не запущен — backend работает без потока")
     yield
+    await pipeline.whatif.stop()
     await pipeline.replay.stop()
     pipeline.close()
 
@@ -41,7 +47,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Разрешаем CORS для дашборда
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -56,6 +61,7 @@ app.include_router(ws_router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():
+    """Отвечает, что сервис работает, и подсказывает, где документация API."""
     return {
         "status": "online",
         "service": settings.PROJECT_NAME,

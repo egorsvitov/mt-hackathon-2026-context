@@ -1,34 +1,51 @@
-/* Карта на MapLibre GL.
-   Подложка — вырезка OpenStreetMap в локальном файле data/basemap/moscow.pmtiles (стиль Protomaps,
-   шрифты и иконки в vendor/protomaps), поэтому карта работает без интернета и без ключей.
-   Поверх подложки — наши слои: маршруты (цвет риска), проблемные участки, целевые остановки,
-   остановки выбранного маршрута и маркеры ТС. Содержимое подсказок и маркеров задаёт app.js. */
+/* Карта на MapLibre GL. Подложка лежит локально в data/basemap/moscow.pmtiles, поэтому карта
+   работает без интернета и ключей. Поверх неё маршруты, проблемные участки, остановки и ТС. */
 (function () {
   'use strict';
 
   const BASEMAP_URL = 'data/basemap/moscow.pmtiles';
   const FLAVOR = { dark: 'black', light: 'grayscale' };
-  const HIDDEN_BASE_LAYERS = new Set(['pois', 'roads_shields']); // спокойная подложка для диспетчера
+  const HIDDEN_BASE_LAYERS = new Set(['pois', 'roads_shields']);
   const ATTRIBUTION = '© <a href="https://www.openstreetmap.org/copyright" target="_blank">участники OpenStreetMap</a> · ' +
     '<a href="https://protomaps.com" target="_blank">Protomaps</a>';
 
   const pageBase = () => location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '');
-  const lngLat = (p) => [p[1], p[0]]; // [lat, lon] -> [lon, lat]
+  const lngLat = (p) => [p[1], p[0]]; // у нас [lat, lon], у MapLibre наоборот
   const fc = (features) => ({ type: 'FeatureCollection', features });
 
+  /** Линии маршрутов для карты. Если у ТС известно направление рейса, рисуем только его. */
   function buildRoutes(net, activePatterns) {
     const features = [];
     for (const r of net.routes) {
+      const active = activePatterns && activePatterns.get(r.tr_id);
+      const segments = r.segments.filter((s) => !active || s.route_pattern_id === active);
       for (const dashed of [false, true]) {
-        const active = activePatterns && activePatterns.get(r.tr_id);
-        const lines = r.segments
-          .filter((s) => !!s.synthetic === dashed && (!active || s.route_pattern_id === active))
-          .map((s) => s.path.map(lngLat));
-        if (!lines.length) continue;
+        const chosen = segments.filter((s) => !!s.synthetic === dashed && s.path.length > 1);
+        if (!chosen.length) continue;
         features.push({
-          type: 'Feature', id: r.tr_id * 2 + (dashed ? 1 : 0),
-          properties: { tr_id: r.tr_id, dashed },
-          geometry: { type: 'MultiLineString', coordinates: lines },
+          type: 'Feature', id: r.tr_id * 4 + (dashed ? 1 : 0),
+          properties: { tr_id: r.tr_id, dashed, join: false },
+          geometry: { type: 'MultiLineString', coordinates: chosen.map((s) => s.path.map(lngLat)) },
+        });
+        // В данных сегменты отсортированы по ID, поэтому стыкуем по порядку остановок.
+        const byPair = new Map(chosen.map((s) => [`${s.route_pattern_id}:${s.from}:${s.to}`, s]));
+        const patterns = new Set(chosen.map((s) => s.route_pattern_id));
+        const joins = [];
+        for (let k = 0; k + 2 < r.stops.length; k++) {
+          const from = r.stops[k], via = r.stops[k + 1], to = r.stops[k + 2];
+          for (const pattern of patterns) {
+            const prev = byPair.get(`${pattern}:${from}:${via}`);
+            const next = byPair.get(`${pattern}:${via}:${to}`);
+            if (!prev || !next) continue;
+            const a = prev.path[prev.path.length - 1], b = next.path[0];
+            if (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) < 1e-7) continue;
+            joins.push([lngLat(a), lngLat(b)]);
+          }
+        }
+        if (joins.length) features.push({
+          type: 'Feature', id: r.tr_id * 4 + (dashed ? 3 : 2),
+          properties: { tr_id: r.tr_id, dashed, join: true },
+          geometry: { type: 'MultiLineString', coordinates: joins },
         });
       }
     }
@@ -36,11 +53,7 @@
   }
 
   class DashMap {
-    /**
-     * @param el      id или элемент контейнера
-     * @param net     Network (util.js)
-     * @param h       {onSelect(tr), routeTooltip(tr) -> html, vehTooltip(tr) -> html}
-     */
+    /** el это контейнер карты, h даёт обработчик выбора ТС и тексты подсказок. */
     constructor(el, net, h) {
       this.el = typeof el === 'string' ? document.getElementById(el) : el;
       this.net = net;
@@ -51,11 +64,11 @@
       this.snap = true;
       this.markers = new Map();
       this.routeState = new Map();
-      this.data = { sections: fc([]), targets: fc([]), stops: fc([]) };
+      this.data = { sections: fc([]), stops: fc([]) };
       this.activePatterns = new Map();
       this.patternSignature = '';
       this.routes = buildRoutes(net, this.activePatterns);
-      // Подложка из PMTiles читается HTTP Range-запросами: с file:// это невозможно.
+      // PMTiles читается Range-запросами, с file:// это не работает
       this.basemap = location.protocol !== 'file:' && !!window.pmtiles && !!window.basemaps;
       this.basemapStatus = this.basemap ? 'loading' : 'file';
       const b = new maplibregl.LngLatBounds();
@@ -63,7 +76,7 @@
       this.bounds = b.isEmpty() ? new maplibregl.LngLatBounds([37.3, 55.55], [37.9, 55.95]) : b;
     }
 
-    /** Создать карту. false — WebGL недоступен. */
+    /** Создаёт карту, возвращает false, если нет WebGL. */
     init(theme, colors) {
       this.theme = theme;
       this.colors = colors;
@@ -98,6 +111,7 @@
       return true;
     }
 
+    /** Стиль карты: подложка Protomaps в нужной теме или пустой фон. */
     style() {
       const base = pageBase();
       const flavor = FLAVOR[this.theme] || 'black';
@@ -113,12 +127,11 @@
       return style;
     }
 
-    /** Наши источники и слои; вызывается после каждой смены стиля (тема). */
+    /** Добавляет наши слои. Вызывается заново после смены темы. */
     addOverlays() {
       const m = this.map, C = this.colors;
       m.addSource('routes', { type: 'geojson', data: this.routes });
       m.addSource('sections', { type: 'geojson', data: this.data.sections });
-      m.addSource('targets', { type: 'geojson', data: this.data.targets });
       m.addSource('stops', { type: 'geojson', data: this.data.stops });
 
       const bySev = (e) => ['match', e, 'critical', C.critical, 'warning', C.warning, 'ok', C.ok, 'early', C.early, C.unknown];
@@ -127,38 +140,52 @@
       const round = { 'line-cap': 'round', 'line-join': 'round' };
       const selFilter = ['==', ['get', 'tr_id'], this.sel == null ? -1 : this.sel];
 
+      const width = ['match', fsev, 'critical', 4, 'warning', 3.5, 'early', 3, 2];
+      const opacity = ['case', fdim, 0.15, ['==', fsev, 'unknown'], 0.3, ['==', fsev, 'ok'], 0.4, 0.9];
       m.addLayer({
-        id: 'routes-line', type: 'line', source: 'routes', filter: ['!', ['get', 'dashed']], layout: round,
+        id: 'routes-joins', type: 'line', source: 'routes', filter: ['get', 'join'], layout: round,
+        paint: { 'line-color': bySev(fsev), 'line-width': ['case', ['get', 'dashed'], 2, width],
+          'line-opacity': ['case', fdim, 0.15, ['get', 'dashed'], 0.5, ['==', fsev, 'unknown'], 0.3, ['==', fsev, 'ok'], 0.4, 0.9] },
+      });
+      m.addLayer({
+        id: 'routes-line', type: 'line', source: 'routes', filter: ['all', ['!', ['get', 'dashed']], ['!', ['get', 'join']]], layout: round,
         paint: {
           'line-color': bySev(fsev),
-          'line-width': ['match', fsev, 'critical', 4, 'warning', 3.5, 'early', 3, 2],
-          'line-opacity': ['case', fdim, 0.15, ['==', fsev, 'unknown'], 0.3, ['==', fsev, 'ok'], 0.4, 0.9],
+          'line-width': width,
+          'line-opacity': opacity,
         },
       });
       m.addLayer({
-        id: 'routes-dash', type: 'line', source: 'routes', filter: ['get', 'dashed'],
+        id: 'routes-dash', type: 'line', source: 'routes', filter: ['all', ['get', 'dashed'], ['!', ['get', 'join']]],
         paint: { 'line-color': bySev(fsev), 'line-width': 2, 'line-dasharray': [1.5, 2.5], 'line-opacity': ['case', fdim, 0.15, 0.5] },
       });
       m.addLayer({
-        id: 'routes-selected', type: 'line', source: 'routes', filter: ['all', selFilter, ['!', ['get', 'dashed']]], layout: round,
+        id: 'routes-selected-joins', type: 'line', source: 'routes', filter: ['all', selFilter, ['get', 'join'], ['!', ['get', 'dashed']]], layout: round,
         paint: { 'line-color': bySev(fsev), 'line-width': 5, 'line-opacity': 0.9 },
       });
-      // Невидимая широкая линия — чтобы по тонкому маршруту было легко попасть курсором.
+      m.addLayer({
+        id: 'routes-selected', type: 'line', source: 'routes', filter: ['all', selFilter, ['!', ['get', 'dashed']], ['!', ['get', 'join']]], layout: round,
+        paint: { 'line-color': bySev(fsev), 'line-width': 5, 'line-opacity': 0.9 },
+      });
+      // невидимая широкая линия, чтобы по тонкому маршруту было легко попасть мышью
       m.addLayer({ id: 'routes-hit', type: 'line', source: 'routes', paint: { 'line-width': 14, 'line-opacity': 0 } });
       m.addLayer({
         id: 'sections-halo', type: 'line', source: 'sections', layout: round,
         paint: { 'line-color': C.page, 'line-width': 11, 'line-opacity': ['case', ['get', 'dim'], 0.2, 0.55] },
       });
       m.addLayer({
-        id: 'sections-line', type: 'line', source: 'sections', filter: ['!', ['get', 'stale']], layout: round,
+        id: 'sections-line', type: 'line', source: 'sections', filter: ['all', ['!', ['get', 'stale']], ['!', ['get', 'recover']]], layout: round,
         paint: { 'line-color': bySev(['get', 'sev']), 'line-width': 6, 'line-opacity': ['case', ['get', 'dim'], 0.3, 0.95] },
       });
       m.addLayer({
-        id: 'sections-stale', type: 'line', source: 'sections', filter: ['get', 'stale'],
+        id: 'sections-recover', type: 'line', source: 'sections', filter: ['get', 'recover'], layout: round,
+        paint: { 'line-color': C.ok, 'line-width': 6, 'line-opacity': ['case', ['get', 'dim'], 0.3, ['get', 'stale'], 0.6, 0.95] },
+      });
+      m.addLayer({
+        id: 'sections-stale', type: 'line', source: 'sections', filter: ['all', ['get', 'stale'], ['!', ['get', 'recover']]],
         paint: { 'line-color': bySev(['get', 'sev']), 'line-width': 6, 'line-dasharray': [1.4, 1], 'line-opacity': ['case', ['get', 'dim'], 0.3, 0.9] },
       });
-      // Остановки — поверх линии участка, иначе ближайшие прячутся под ней.
-      // state: passed — пройдена; next — впереди до цели; target — цель прогноза; after — после цели; other — прочие.
+      // остановки кладём поверх участка, иначе ближайшие прячутся под линией
       const st = ['coalesce', ['get', 'state'], 'other'];
       m.addLayer({
         id: 'stops', type: 'circle', source: 'stops',
@@ -179,25 +206,17 @@
         },
         paint: { 'text-color': ['match', st, 'target', C.text, C.text2], 'text-halo-color': C.page, 'text-halo-width': 1.8 },
       });
-      m.addLayer({
-        id: 'targets', type: 'circle', source: 'targets',
-        paint: {
-          'circle-radius': 6, 'circle-color': C.surface, 'circle-stroke-width': 3, 'circle-stroke-color': bySev(['get', 'sev']),
-          'circle-opacity': ['case', ['get', 'dim'], 0.4, 1], 'circle-stroke-opacity': ['case', ['get', 'dim'], 0.4, 1],
-        },
-      });
-
       for (const [id, st] of this.routeState) m.setFeatureState({ source: 'routes', id }, st);
       if (!this.eventsBound) this.bindEvents();
       this.ready = true;
     }
 
+    /** Клики и подсказки на маршрутах и остановках. */
     bindEvents() {
       const m = this.map;
       this.eventsBound = true;
       const hover = {
         'routes-hit': (f) => this.h.routeTooltip(f.properties.tr_id),
-        targets: (f) => f.properties.html,
         stops: (f) => `<b>${U.esc(f.properties.name)}</b>${f.properties.tip ? `<br>${U.esc(f.properties.tip)}` : ''}`,
       };
       for (const [id, html] of Object.entries(hover)) {
@@ -209,17 +228,18 @@
         m.on('mouseleave', id, () => { m.getCanvas().style.cursor = ''; if (!this.hoverVehicle) this.popup.remove(); });
       }
       m.on('click', (e) => {
-        const layers = ['targets', 'routes-hit'].filter((id) => m.getLayer(id));
-        const f = m.queryRenderedFeatures(e.point, { layers })[0];
+        const f = m.queryRenderedFeatures(e.point, { layers: ['routes-hit'] })[0];
         if (f) this.h.onSelect(f.properties.tr_id);
       });
     }
 
+    /** Обновляет данные источника, если карта уже готова. */
     setSource(id, data) {
       this.data[id] = data;
       if (this.ready && this.map.getSource(id)) this.map.getSource(id).setData(data);
     }
 
+    /** Перестраивает линии, когда меняются направления рейсов ТС. */
     setActivePatterns(patterns) {
       const signature = [...patterns].sort((a, b) => a[0] - b[0]).map((x) => `${x[0]}:${x[1] || ''}`).join('|');
       if (signature === this.patternSignature) return;
@@ -230,44 +250,42 @@
       this.setSource('routes', this.routes);
     }
 
-    /** sev: Map(tr_id -> severity); sel — выбранное ТС или null. */
+    /** Красит маршруты по уровню риска и выделяет выбранное ТС. */
     setRoutes(sev, sel) {
       if (!this.map) return;
       if (sel !== this.sel) {
         this.sel = sel;
-        if (this.ready) this.map.setFilter('routes-selected', ['all', ['==', ['get', 'tr_id'], sel == null ? -1 : sel], ['!', ['get', 'dashed']]]);
-      }
-      for (const r of this.net.routes) {
-        const st = { sev: sev.get(r.tr_id) || 'unknown', dim: sel != null && sel !== r.tr_id };
-        const key = `${st.sev}:${st.dim}`;
-        for (const id of [r.tr_id * 2, r.tr_id * 2 + 1]) {
-          if (this.routeState.get(id) && this.routeState.get(id)._k === key) continue;
-          this.routeState.set(id, { ...st, _k: key });
-          if (this.ready) this.map.setFeatureState({ source: 'routes', id }, st);
+        if (this.ready) {
+          const selected = ['==', ['get', 'tr_id'], sel == null ? -1 : sel];
+          this.map.setFilter('routes-selected', ['all', selected, ['!', ['get', 'dashed']], ['!', ['get', 'join']]]);
+          this.map.setFilter('routes-selected-joins', ['all', selected, ['get', 'join'], ['!', ['get', 'dashed']]]);
         }
+      }
+      for (const feature of this.routes.features) {
+        const tr = feature.properties.tr_id, id = feature.id;
+        const st = { sev: sev.get(tr) || 'unknown', dim: sel != null && sel !== tr };
+        const key = `${st.sev}:${st.dim}`;
+        if (this.routeState.get(id) && this.routeState.get(id)._k === key) continue;
+        this.routeState.set(id, { ...st, _k: key });
+        if (this.ready) this.map.setFeatureState({ source: 'routes', id }, st);
       }
     }
 
-    /** list: [{tr, path: [[lat, lon]], sev, stale, dim, target: {lat, lon, html}}] */
+    /** Проблемные участки: от последней пройденной остановки до целевой. */
     setSections(list) {
-      const lines = [], points = [];
+      const lines = [];
       for (const s of list) {
-        const paths = s.paths || (s.path ? [s.path] : []);
-        for (const path of paths) {
+        const parts = s.parts || [];
+        for (const { path, recover } of parts) {
           if (path.length > 1) {
-            lines.push({ type: 'Feature', properties: { tr_id: s.tr, sev: s.sev, stale: !!s.stale, dim: !!s.dim }, geometry: { type: 'LineString', coordinates: path.map(lngLat) } });
+            lines.push({ type: 'Feature', properties: { tr_id: s.tr, sev: s.sev, stale: !!s.stale, dim: !!s.dim, recover: !!recover }, geometry: { type: 'LineString', coordinates: path.map(lngLat) } });
           }
-        }
-        if (s.target) {
-          points.push({ type: 'Feature', properties: { tr_id: s.tr, sev: s.sev, dim: !!s.dim, html: s.target.html }, geometry: { type: 'Point', coordinates: [s.target.lon, s.target.lat] } });
         }
       }
       this.setSource('sections', fc(lines));
-      this.setSource('targets', fc(points));
     }
 
-    /** list: [{lat, lon, name}]; small — мельче, когда показаны все остановки сети. */
-    /** list: [{lat, lon, name, state?, label?, tip?, color?}]; small — мельче, когда показаны все остановки сети. */
+    /** Остановки на карте. small делает их мельче, когда показаны все остановки сети. */
     setStops(list, small) {
       this.setSource('stops', fc(list.map((s) => {
         const props = { name: s.name, r: small ? 2.5 : 3.5, state: s.state || 'other' };
@@ -278,7 +296,7 @@
       })));
     }
 
-    /** list: [{tr, lat, lon, html, z, sel, big, clickable}] — маркеры ТС (HTML поверх карты). */
+    /** Маркеры ТС: создаёт новые, двигает существующие и убирает пропавшие. */
     setVehicles(list) {
       if (!this.map) return;
       const now = performance.now();
@@ -316,7 +334,7 @@
       this.snap = false;
     }
 
-    /** Плавное движение маркеров между отметками; вызывается в каждом кадре. */
+    /** Плавно двигает маркеры между отметками, вызывается каждый кадр. */
     animate(now) {
       for (const mk of this.markers.values()) {
         if (mk.done) continue;
@@ -327,9 +345,10 @@
       }
     }
 
-    /** Следующее обновление — без анимации (перемотка). */
+    /** Следующее обновление без анимации, например после перемотки. */
     snapNext() { this.snap = true; }
 
+    /** Меняет тему карты. */
     setTheme(theme, colors) {
       if (!this.map || theme === this.theme && colors === this.colors) return;
       this.theme = theme;
@@ -339,13 +358,14 @@
       this.map.setStyle(this.style(), { diff: false });
     }
 
+    /** Показывает всю сеть. */
     fitNetwork() {
       if (!this.map) return;
       this.map.resize();
       this.map.fitBounds(this.bounds, { padding: 24, animate: false });
     }
 
-    /** Показать участок: points — [[lat, lon], ...]. */
+    /** Приближает карту к набору точек. */
     focus(points) {
       if (!this.map || !points.length) return;
       const b = new maplibregl.LngLatBounds();

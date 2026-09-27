@@ -1,0 +1,19 @@
+{
+  "kind": "run",
+  "target": "run_time_s",
+  "numeric": [
+    "segment_length_m",
+    "planned_interval_s",
+    "hour",
+    "recent_speed_kmh",
+    "endpoint_distance_m",
+    "max_gap_s"
+  ],
+  "categorical": [
+    "route_pattern_id",
+    "direction_id",
+    "segment_id"
+  ],
+  "experts": {},
+  "expert_counts": {}
+}
