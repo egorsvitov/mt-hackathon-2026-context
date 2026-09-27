@@ -1,23 +1,5 @@
-# Рабочий контекст команды
+# Решение команды для хакатона Московского Транспорта 2026
 
-Код решения находится в `../mt-hackathon-2026/`. Этот репозиторий содержит задание, справочные материалы и внутренние заметки; для запуска и разработки решения он не требуется.
-
-| Путь | Содержимое |
-|---|---|
-| [task/assignment.md](task/assignment.md) | Полный текст задания в Markdown |
-| [task/assignment.pdf](task/assignment.pdf) | Исходный PDF |
-| [other_info/dataset/README.md](other_info/dataset/README.md) | Исходное описание датасета, метрики и submission |
-| [other_info/dataset/docs/Emulator-and-Telematic-Packets-Specification.md](other_info/dataset/docs/Emulator-and-Telematic-Packets-Specification.md) | Спецификация NDTP и эмулятора |
-| [planning/plan_gpt6_astra.md](planning/plan_gpt6_astra.md) | Ранее подготовленный анализ и план; выводы требуют проверки |
-| [backend/](backend/) | Backend на FastAPI: приём телеметрии, детектор прибытий, признаки, прогноз через ML-сервис, API дашборда ([README](backend/README.md)) |
-| [dashboard/](dashboard/) | Диспетчерский дашборд: карта MapLibre с офлайн-подложкой OSM, инциденты, проверка прогнозов ([README](dashboard/README.md), [контракт данных](dashboard/CONTRACT.md)) |
-| [map_matching/](map_matching/) | Офлайн-каталог маршрутов, причинный HMM и экспорт matched-геометрии для backend и dashboard |
-| [docker-compose.yml](docker-compose.yml) | NDTP-парсер + backend + CatBoost ML-сервис + дашборд одной командой: `DATA_DIR=<датасет> docker compose up --build` |
-| [research/deep-research-report.md](research/deep-research-report.md) | Обзор литературы и рекомендации по ML-архитектуре |
-| [planning/architecture_after_research.md](planning/architecture_after_research.md) | Разбор отчёта, повторная проверка данных и предложение архитектуры |
-| [ml_service/](ml_service/README.md) | Production CatBoost v2 и опциональный GPU-ансамбль TS2Vec; сохранённые веса, без обучения |
-| [ndtp-parser/](ndtp-parser/) | TCP-приёмник и парсер телеметрии NDTP в формат `traffic.csv` |
-| [research/papers/Wai_Zhou_2020_Real_Time_Bus_Time_Predictions.pdf](research/papers/Wai_Zhou_2020_Real_Time_Bus_Time_Predictions.pdf) | Wai & Zhou (2020): production-архитектура XGBoost-прогнозов времени движения и стоянки |
 
 ## Быстрый старт (для жюри)
 
@@ -39,7 +21,7 @@
    - Флаг `-d` запускает контейнеры в фоновом режиме.
 
 После успешного запуска сервисы будут доступны по следующим адресам:
-- **Диспетчерский дашборд**: [http://localhost:18080](http://localhost:18080) (Карта, инциденты, визуализация)
+- **Диспетчерский дашборд**: [http://localhost:18090](http://localhost:18090) (Карта, инциденты, визуализация)
 - **Документация API (Backend, Swagger)**: [http://localhost:18000/docs](http://localhost:18000/docs)
 - **NDTP-парсер (TCP)**: `localhost:19201`
 
@@ -59,7 +41,10 @@ docker compose --profile emulator up -d          # API эмулятора: http:
 отметки отбрасываются как «из будущего» (`rejected_future` в `/metrics`), чтобы не ломать
 воспроизводимый день.
 
-## Локальные данные
+**Где посмотреть результаты и алерты?**
+- **Прогнозы и маршруты**: откройте [http://localhost:18090](http://localhost:18090). Прямо на карте будут отображаться движущиеся ТС (из эмулятора или исторического датасета) и их спрогнозированное время прибытия.
+- **Алерты (инциденты)**: на том же дашборде [http://localhost:18090](http://localhost:18090) работает визуальная панель инцидентов. Там появляются уведомления о задержках, опережениях графика или нештатных остановках.
+- **Метрики производительности**: перейдите по адресу [http://localhost:18000/metrics](http://localhost:18000/metrics) для просмотра системных метрик потока (Prometheus формат).
 ### Как использовать Swagger (API Документация)
 
 Swagger UI ([http://localhost:18000/docs](http://localhost:18000/docs)) предоставляет интерактивный веб-интерфейс для нашего API бэкенда.
@@ -83,6 +68,14 @@ Swagger UI ([http://localhost:18000/docs](http://localhost:18000/docs)) пред
 | **Cold start (сборка + запуск)** | ~23.5 сек |
 | **Работа fallback (отключение ML)** | Успешно (backend не падает, отдает `status=fallback` и `fallback:persistence`) |
 | **Автовосстановление ML** | Успешно (при рестарте ml-service backend автоматически переключается на `status=model`) |
+
+### Дополнительные реализованные возможности (Киллер-фичи)
+Помимо базового функционала, наша команда реализовала ряд продвинутых механизмов:
+- **Два ML-движка (Ансамбль)**: Мы внедрили и заморозили в production-окружении как `CatBoost v2`, так и опциональный GPU-ансамбль `TS2Vec` для улучшенного предсказания (без необходимости дообучения).
+- **Офлайн-карта и Map Matching**: Диспетчерский дашборд работает с предварительно скачанной подложкой OSM, а алгоритм причинного HMM матчит маршруты полностью офлайн.
+- **Интегрированный Replay-движок (Исторический датасет)**: Бэкенд умеет воспроизводить исторический день (из CSV) с заданного времени, что позволяет жюри моментально увидеть работу системы.
+- **Система Fallback и Auto-Recovery**: При недоступности ML-сервиса бэкенд мгновенно переключается на эвристический алгоритм (persistence).
+- **Продвинутый стриминг на Дашборд**: Передача состояния маршрутов, прогнозов и инцидентов на дашборд через стабильный WebSocket.
 
 ## Документация разработчика (Sphinx)
 
