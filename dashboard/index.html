@@ -7,6 +7,9 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%233987e5'/%3E%3Cpath d='M4 11l3-6 2 4 1.5-2L12 11z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="vendor/maplibre/maplibre-gl.css">
   <link rel="stylesheet" href="css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script>
     // Тема до отрисовки, чтобы не мигало. По умолчанию — тёмная (диспетчерская).
     try { const t = localStorage.getItem('dash-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
@@ -15,7 +18,9 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <div class="logo">◆</div>
+      <a href="https://mt-hackathon.ru" target="_blank" rel="noopener" title="Сайт хакатона">
+        <img class="brand-logo" src="vendor/logo/mt-hackathon.svg" alt="Хакатон Московского транспорта">
+      </a>
       <div><b>Предиктор задержек</b><small>прогноз за 10–15 мин</small></div>
     </div>
     <nav class="views-nav" id="views-nav" aria-label="Экраны">
@@ -23,6 +28,14 @@
       <a href="#analytics" data-view="analytics">Аналитика</a>
       <a href="#journal" data-view="journal">Журнал</a>
     </nav>
+    <div class="org-logos">
+      <a href="https://mttech.moscow" target="_blank" rel="noopener" title="МТТЕХ — центр разработки Московского транспорта">
+        <img class="org-logo" src="vendor/logo/mttex.svg" alt="МТТЕХ">
+      </a>
+      <a href="https://ftim.ru" target="_blank" rel="noopener" title="Фонд «Транспортные инновации Москвы»">
+        <img class="org-logo" src="vendor/logo/transport-innovations.svg" alt="Транспортные инновации Москвы">
+      </a>
+    </div>
     <div class="clock"><span id="clock-time" class="num">--:--:--</span><small id="clock-date"></small></div>
     <div class="top-actions">
       <span class="status-pill" id="status-pill" title="Свежесть данных"><span class="dot"></span><span id="status-text">…</span></span>

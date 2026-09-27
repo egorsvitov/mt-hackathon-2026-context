@@ -450,6 +450,10 @@
     const r = App.net.routeByTr.get(tr);
     let h = `<b>ТС ${tr}</b>${r ? ` · ${U.esc(r.name)}` : ' · <span class="muted">нет расписания</span>'}<br>` +
       `${U.num(v.speed)} км/ч · данные ${U.dur(v.data_age_s)} назад`;
+    // Точность позиции: съехал ли автобус с маршрута и насколько надёжно совпадение с планом.
+    if (v.off_route) h += `<br><span class="sev" style="color:var(--warn)">съехал с маршрута</span>`;
+    else if (v.position_quality === 'matched') h += `<br><span class="sev" style="color:var(--ok)">на маршруте</span>`;
+    else if (v.position_quality) h += `<br><span class="sev" style="color:var(--muted)">позиция ${v.position_quality}</span>`;
     if (p) h += `<br>${U.sevBadge(p.severity)} ${plainDelay(p.prediction_delay_s)} к «${U.esc(p.target_stop_name)}» в ${U.time(p.predicted_arrival)}`;
     return h;
   }
@@ -693,7 +697,9 @@
       `<button class="sb-item${c[k] ? '' : ' zero'}${App.filter === k ? ' on' : ''}" data-filter="${k}">${U.sevIcon(k, 13)}<b>${c[k]}</b> ${U.SEV[k].label.toLowerCase()}</button>`).join('');
     const att = s.incidents.filter((i) => i.status === 'active' && i.severity !== 'ok');
     const inWork = att.filter((i) => App.ack.has(i.incident_id)).length;
-    const html = `<div class="sb-total"><b>${total}</b> из ${App.net.routes.length} маршрутов на линии</div>` +
+    const off = App.net.routes.length - total;
+    const offNote = off > 0 ? ` · <span class="muted">${off} без ТС</span>` : '';
+    const html = `<div class="sb-total"><b>${total}</b> из ${App.net.routes.length} маршрутов на линии${offNote}</div>` +
       `<div class="sb-bar">${bar}</div><div class="sb-items">${labels}</div>` +
       `<div class="sb-att">${att.length ? `Требуют внимания: <b>${att.length - inWork}</b>${inWork ? ` · в работе ${inWork}` : ''}` : 'Все ТС идут по графику'}</div>`;
     if (html !== App.html.status) { App.html.status = html; $('statusbar').innerHTML = html; }
